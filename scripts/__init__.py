@@ -1,0 +1,1 @@
+"""Minimal package marker for scripts-based entrypoints."""

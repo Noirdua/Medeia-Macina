@@ -1,0 +1,130 @@
+{
+  "Occult": [
+    "esoterica",
+    "ritual",
+    "alchemy",
+    "magic",
+    "hermetic",
+    "divination",
+    "grimoires",
+    "symbolism",
+    "ceremony"
+  ],
+  "Philosophy": [
+    "ethics",
+    "metaphysics",
+    "epistemology",
+    "logic",
+    "existentialism",
+    "stoicism",
+    "phenomenology",
+    "dialectic",
+    "aesthetics"
+  ],
+  "Mystery": [
+    "investigation",
+    "crime",
+    "detective",
+    "noir",
+    "thriller",
+    "suspense",
+    "conspiracy",
+    "whodunit",
+    "clues"
+  ],
+  "Religion": [
+    "scripture",
+    "theology",
+    "worship",
+    "ritual",
+    "doctrine",
+    "faith",
+    "tradition",
+    "liturgy",
+    "sacred"
+  ],
+  "Mythology": [
+    "gods",
+    "creation",
+    "heroes",
+    "legends",
+    "folklore",
+    "pantheon",
+    "epic",
+    "mythic",
+    "archetype"
+  ],
+  "Science": [
+    "research",
+    "experiment",
+    "theory",
+    "biology",
+    "physics",
+    "chemistry",
+    "data",
+    "method",
+    "innovation"
+  ],
+  "Art": [
+    "visual",
+    "painting",
+    "sculpture",
+    "modernism",
+    "technique",
+    "studio",
+    "curation",
+    "expression",
+    "composition"
+  ],
+  "Literature": [
+    "fiction",
+    "poetry",
+    "novel",
+    "criticism",
+    "narrative",
+    "prose",
+    "drama",
+    "canonical",
+    "translation"
+  ],
+  "History": [
+    "archaeology",
+    "chronicle",
+    "period",
+    "empire",
+    "revolution",
+    "archive",
+    "heritage",
+    "historiography",
+    "timeline"
+  ],
+  "Psychology": [
+    "cognition",
+    "behavior",
+    "therapy",
+    "development",
+    "neuroscience",
+    "personality",
+    "perception",
+    "emotion",
+    "motivation"
+  ],
+  "gnostic": [
+    "religion",
+    "scripture",
+    "gnostic",
+    "gospel",
+    "wisdom",
+    "spirituality",
+    "ancient",
+    "philosophy",
+    "esoteric",
+    "mysticism",
+    "mythology",
+    "theology",
+    "sacred",
+    "divine",
+    "apocrapha",
+    "gnosticism"
+  ]
+}

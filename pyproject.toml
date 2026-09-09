@@ -1,0 +1,167 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medeia-macina"
+version = "0.1.0"
+description = "Comprehensive media management and search platform with support for local files, Hydrus database, torrents, books, and P2P networks"
+requires-python = ">=3.10,<3.15"
+license = {text = "MIT"}
+authors = [
+    {name = "Medeia"}
+]
+keywords = ["media", "search", "management", "hydrus", "download", "cli", "tui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia",
+    "Topic :: Internet",
+]
+
+dependencies = [
+    # Core CLI and TUI frameworks
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    "prompt-toolkit>=3.0.0",
+    "textual>=0.30.0",
+
+    "requests>=2.31.0",
+    "charset-normalizer>=3.2.0",
+    "certifi>=2024.12.0",
+    "httpx>=0.25.0",
+    "pypdf>=3.0.0",
+    "mutagen>=1.46.0",
+    "zstandard>=0.23.0",
+    "pypandoc-binary",
+    "Pillow>=10.0.0",
+    "ffmpeg-python>=0.2.0",
+    "lxml>=4.9.0",
+    "tqdm>=4.66.0",
+    "python-dateutil>=2.8.0",
+    "pycryptodome>=3.19.0",
+]
+
+[project.optional-dependencies]
+impersonate = [
+    "curl_cffi>=0.7.0",
+]
+dev = [
+    # Testing
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+
+    # Code quality
+    "black>=23.11.0",
+    "flake8>=6.1.0",
+    "isort>=5.12.0",
+    "mypy>=1.7.0",
+    "pylint>=3.0.0",
+
+    # Documentation
+    "sphinx>=7.2.0",
+    "sphinx-rtd-theme>=1.3.0",
+
+    # Debugging and profiling
+    "ipython>=8.17.0",
+    "ipdb>=0.13.0",
+    "memory-profiler>=0.61.0",
+
+    # Version control and CI/CD helpers
+    "pre-commit>=3.5.0",
+]
+
+[project.scripts]
+mm = "scripts.cli_entry:main"
+medeia = "scripts.cli_entry:main"
+
+[tool.setuptools]
+packages = [
+    "scripts",
+    "cmdlet",
+    "cmdnat",
+    "API",
+    "PluginCore",
+    "SYS",
+]
+package-dir = {"" = "."}
+
+[tool.setuptools.package-data]
+scripts = ["*.py"]
+
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+include = '\\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | __pycache__
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+target_version = ["py39", "py310", "py311", "py312"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+
+[tool.pylint.messages_control]
+disable = [
+    "C0330", "C0326",  # Bad whitespace
+    "R0913",            # Too many arguments
+    "R0914",            # Too many local variables
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --cov=. --cov-report=html --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
