@@ -609,6 +609,33 @@ def _process_provider_items(self,
             transfer_label = label
 
             downloaded_path: Optional[Path] = None
+            target_text = str(target or "").strip()
+            if target_text and not target_text.lower().startswith(
+                ("http://", "https://", "magnet:")
+            ):
+                try:
+                    existing = Path(target_text).expanduser()
+                    if existing.is_file():
+                        downloaded_path = existing
+                except Exception:
+                    downloaded_path = None
+            if downloaded_path is not None:
+                _emit_local_file(
+                    self,
+                    downloaded_path=downloaded_path,
+                    source=None,
+                    title_hint=str(title or "") or None,
+                    tags_hint=tags_list,
+                    media_kind_hint=str(media_kind or "file") if media_kind else "file",
+                    full_metadata=full_metadata if isinstance(full_metadata, dict) else None,
+                    progress=progress,
+                    config=config,
+                    provider_hint=self._provider_key_from_item(item),
+                )
+                downloaded_count += 1
+                processed_items += 1
+                continue
+
             attempted_provider_download = False
             provider_sr = None
             provider_obj = None

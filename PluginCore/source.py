@@ -15,6 +15,27 @@ DEFAULT_PLUGIN_SOURCE = ""
 DEFAULT_PLUGIN_SOURCE_BRANCH = "main"
 
 
+def _sibling_plugin_source() -> Optional[Path]:
+    try:
+        from PluginCore.registry import _repo_root
+
+        parent = _repo_root().parent
+    except Exception:
+        return None
+    for name in (
+        "Medeia-Macina-Plugin",
+        "Medios-Macina-Plugin",
+        "medeia-macina-plugin",
+    ):
+        candidate = parent / name
+        try:
+            if candidate.is_dir() and any(candidate.iterdir()):
+                return candidate.resolve()
+        except Exception:
+            continue
+    return None
+
+
 def plugin_source_url(config: Optional[Dict[str, Any]] = None) -> str:
     import os
 
@@ -26,6 +47,9 @@ def plugin_source_url(config: Optional[Dict[str, Any]] = None) -> str:
         raw = str(config.get("plugin_source") or "").strip()
         if raw:
             return raw
+    sibling = _sibling_plugin_source()
+    if sibling is not None:
+        return str(sibling)
     return DEFAULT_PLUGIN_SOURCE
 
 
@@ -147,6 +171,11 @@ def _clone_source(url: str, dest: Path, branch: str) -> None:
 
 def sync_plugin_source(config: Optional[Dict[str, Any]] = None) -> Path:
     url = plugin_source_url(config)
+    if not str(url or "").strip():
+        raise RuntimeError(
+            "No plugin source configured. Set it with .plugin -source <folder-or-git-url> "
+            "or MM_PLUGIN_SOURCE."
+        )
     local = _as_local_source(url)
     if local is not None:
         if (local / ".git").exists():

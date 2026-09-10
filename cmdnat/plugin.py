@@ -295,7 +295,6 @@ def _run_install(names: List[str], config: Dict[str, Any], *, update: bool, forc
         missing = []
     if missing:
         from SYS.logger import log
-        import sys
 
         needed = ", ".join(missing)
         log(

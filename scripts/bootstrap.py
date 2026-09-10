@@ -1088,6 +1088,9 @@ def main() -> int:
 
     def _clone_repo(url: str, dest: Path, depth: int = 1) -> bool:
         """Helper to clone a repository."""
+        if not str(url or "").strip():
+            print("Error: repository URL is empty (set MM_REPO_URL).", file=sys.stderr)
+            return False
         try:
             cmd = ["git", "clone"]
             if depth:

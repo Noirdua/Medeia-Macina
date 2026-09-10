@@ -1536,11 +1536,18 @@ class PipelineExecutor:
                         )
                         auto_cmd_norm = _norm_cmd_name(auto_stage[0])
                         dest_path = PipelineExecutor._stage_dest_path(stages[0])
+                        already_has_download = bool(
+                            inserted_provider_download
+                            or any(
+                                PipelineExecutor._stage_file_action(stage) == "download-file"
+                                for stage in stages
+                            )
+                        )
                         skip_download_auto = bool(
-                            PipelineExecutor._stage_file_action(stages[0]) == "add-file"
-                            and auto_cmd_norm in {"download-file", "file"}
+                            auto_cmd_norm in {"download-file", "file"}
                             and (
-                                dest_path
+                                already_has_download
+                                or dest_path
                                 or PipelineExecutor._selection_has_local_files(
                                     selection_indices, items_list
                                 )

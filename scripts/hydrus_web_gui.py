@@ -136,6 +136,8 @@ def ensure_node_runtime(debug: bool = False) -> tuple[str, str]:
 
 
 def clone_or_update_repo(repo_url: str, dest: Path, force: bool = False, debug: bool = False) -> None:
+    if not str(repo_url or "").strip():
+        raise RuntimeError("No Hydrus web GUI repo URL (set MM_HYDRUS_WEB_GUI_REPO or pass --repo).")
     git = find_executable("git")
     if not git:
         raise RuntimeError("git is required to install the Hydrus web GUI.")
