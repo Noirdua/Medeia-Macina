@@ -92,6 +92,38 @@ class PipelineExecutor:
         return None
 
     @staticmethod
+    def _stage_progress_label(stage_tokens: Sequence[Any]) -> str:
+        if not stage_tokens:
+            return "stage"
+        head = str(stage_tokens[0] or "").replace("_", "-").strip().lower()
+        action = PipelineExecutor._stage_file_action(stage_tokens)
+        if action == "download-file":
+            return "download"
+        if action == "add-file":
+            if PipelineExecutor._stage_dest_path(stage_tokens):
+                return "save"
+            toks = [str(t) for t in stage_tokens[1:]]
+            for idx, tok in enumerate(toks):
+                low = tok.replace("_", "-").strip().lower()
+                if low in {"-plugin", "--plugin"} and idx + 1 < len(toks):
+                    nxt = str(toks[idx + 1] or "").strip()
+                    if nxt and not nxt.startswith("-"):
+                        return "upload"
+                if low.startswith("-plugin=") or low.startswith("--plugin="):
+                    return "upload"
+            return "add"
+        if action == "delete-file":
+            return "delete"
+        if head == "file":
+            args = {
+                str(t).replace("_", "-").strip().lower() for t in stage_tokens[1:]
+            }
+            for name in ("search", "convert", "trim", "archive", "merge"):
+                if f"-{name}" in args or f"--{name}" in args:
+                    return name
+        return head or "stage"
+
+    @staticmethod
     def _stage_dest_path(stage_tokens: Sequence[Any]) -> Optional[str]:
         tokens = [str(t) for t in (stage_tokens or [])]
         for idx, tok in enumerate(tokens):
@@ -1064,7 +1096,11 @@ class PipelineExecutor:
                     except Exception:
                         row_action = None
                     if row_action:
-                        stages.insert(0, list(row_action))
+                        replay = _split_pipeline_tokens(row_action)
+                        if replay:
+                            stages[:] = replay
+                        else:
+                            stages.insert(0, list(row_action))
                         return True, None
 
                 if source_cmd and not skip_pipe_expansion and not prefer_row_action:
@@ -1711,7 +1747,9 @@ class PipelineExecutor:
                     ):
                         continue
                     pipe_stage_indices.append(idx)
-                    pipe_labels.append(name)
+                    pipe_labels.append(
+                        PipelineExecutor._stage_progress_label(stage_tokens) or name
+                    )
 
                 if pipe_labels:
                     progress_ui = PipelineLiveProgress(pipe_labels, enabled=True)
@@ -1850,6 +1888,19 @@ class PipelineExecutor:
                 return
             if initial_piped is not None:
                 piped_result = initial_piped
+
+            try:
+                from SYS.instance_chooser import (
+                    maybe_publish_pipeline_instance_chooser,
+                    store_pipeline_target_instances,
+                )
+
+                if maybe_publish_pipeline_instance_chooser(stages, config):
+                    pipeline_status = "paused_selection"
+                    return
+                store_pipeline_target_instances(stages)
+            except Exception:
+                logger.exception("Failed pipeline instance chooser before stages")
 
             progress_ui, pipe_index_by_stage = self._maybe_start_live_progress(
                 config, stages

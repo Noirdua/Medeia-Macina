@@ -205,6 +205,15 @@ class File(Cmdlet):
                 log(f"file: conflicting actions ({rendered}); choose exactly one", file=sys.stderr)
             return 1
 
+        if action in self._PLUGIN_SCOPED_ACTIONS:
+            try:
+                from SYS.instance_chooser import maybe_publish_instance_chooser
+
+                if maybe_publish_instance_chooser(args, config, command="file"):
+                    return 0
+            except Exception:
+                pass
+
         return self._dispatch(action, result, passthrough_args, config)
 
 

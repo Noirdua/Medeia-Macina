@@ -642,6 +642,22 @@ def _collect_existing_url_match_refs_for_url(
         except Exception:
             pass
 
+        try:
+            from SYS.instance_chooser import filter_backends_to_pipeline_instances
+
+            allowed = {
+                str(n).strip().lower()
+                for n in filter_backends_to_pipeline_instances([name for name, _backend in backends])
+            }
+            if allowed:
+                backends = [
+                    (name, backend)
+                    for name, backend in backends
+                    if str(name).strip().lower() in allowed
+                ]
+        except Exception:
+            pass
+
         return backends
 
     for backend_name, backend in _iter_backends():

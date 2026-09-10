@@ -631,6 +631,13 @@ def check_url_exists_in_storage(
 
         backend_names.append(backend_name)
 
+    try:
+        from SYS.instance_chooser import filter_backends_to_pipeline_instances
+
+        backend_names = filter_backends_to_pipeline_instances(backend_names)
+    except Exception:
+        pass
+
     if not backend_names:
         debug("Bulk URL preflight skipped: no searchable backends")
         return True
