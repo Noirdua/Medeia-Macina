@@ -130,11 +130,22 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
         if isinstance(raw_path, Path):
             target_path = raw_path
         elif isinstance(raw_path, str) and raw_path.strip():
-            candidate = Path(raw_path).expanduser()
-            if candidate.exists():
-                target_path = candidate
+            text = raw_path.strip()
+            low = text.lower()
+            if not (low.startswith("http://") or low.startswith("https://")):
+                candidate = Path(text).expanduser()
+                if candidate.exists():
+                    target_path = candidate
         if target_path and target_path.exists():
             return target_path
+        try:
+            from .archive import _resolve_existing_or_fetch_path
+
+            fetched, _temp = _resolve_existing_or_fetch_path(item, config)
+        except Exception:
+            fetched = None
+        if fetched is not None and fetched.exists():
+            return fetched
         return None
 
     def _extract_url(item: Dict[str, Any]) -> Optional[str]:
@@ -351,20 +362,23 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
 
     _merge_debug("merge-file", files=len(source_files), output=str(output_path))
 
-    def _title_value_from_tags(tags: List[str]) -> Optional[str]:
+    def _namespaced_tag(tags: List[str], key: str) -> Optional[str]:
+        prefix = f"{str(key or '').strip().lower()}:"
+        if prefix == ":":
+            return None
         for t in tags:
             try:
                 s = str(t)
             except Exception:
                 continue
-            if s.lower().startswith("title:"):
+            if s.lower().startswith(prefix):
                 val = s.split(":", 1)[1].strip()
                 return val or None
         return None
 
-    # Determine best title:
-    # - prefer a title tag shared across all inputs (typical when user did add-tag title:...)
-    # - otherwise fall back to first title tag encountered
+    def _title_value_from_tags(tags: List[str]) -> Optional[str]:
+        return _namespaced_tag(tags, "title")
+
     shared_title: Optional[str] = None
     try:
         if source_item_tag_lists:
@@ -372,12 +386,13 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
                 _title_value_from_tags(tl) for tl in source_item_tag_lists
             ]
             non_empty = [t for t in per_item_titles if t]
-            if non_empty:
-                candidate = non_empty[0]
-                if candidate and all((t == candidate) for t in non_empty):
-                    shared_title = candidate
-                else:
-                    shared_title = non_empty[0]
+            if non_empty and all((t == non_empty[0]) for t in non_empty):
+                shared_title = non_empty[0]
+            albums = [_namespaced_tag(tl, "album") for tl in source_item_tag_lists]
+            album_vals = [a for a in albums if a]
+            if album_vals and all(a.lower() == album_vals[0].lower() for a in album_vals):
+                if (not shared_title) or len(set(t.lower() for t in non_empty)) > 1:
+                    shared_title = album_vals[0]
     except Exception:
         shared_title = None
 

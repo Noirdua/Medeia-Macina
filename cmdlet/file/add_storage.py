@@ -692,9 +692,20 @@ def _handle_storage_backend(
 
         duplicate_hash = Add_File._find_existing_hash_by_urls(backend, url)
         skip_upload = False
+        local_hash = str(f_hash or "").strip().lower()
+        dup_hash = str(duplicate_hash or "").strip().lower()
+        if (
+            duplicate_hash
+            and local_hash
+            and len(local_hash) == 64
+            and dup_hash != local_hash
+        ):
+            debug(
+                f"[add-file] URL exists as {dup_hash[:12]} in '{backend_name}' "
+                f"but local file hash is {local_hash[:12]}; uploading new bytes"
+            )
+            duplicate_hash = None
         if duplicate_hash:
-            # URL associations can outlive missing file bytes (failed prior imports).
-            # Only skip the byte upload when the backend still has the file.
             has_file = True
             checker = getattr(backend, "has_file", None)
             if callable(checker):

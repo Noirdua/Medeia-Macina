@@ -34,7 +34,7 @@ def _extract_sha256_hex(item: Any) -> str:
 
 
 def _extract_store_name(item: Any) -> str:
-    return get_store_name(item, "store") or ""
+    return get_store_name(item, "store", "instance") or ""
 
 
 def _extract_url(item: Any) -> str:
