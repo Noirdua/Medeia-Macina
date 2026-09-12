@@ -121,9 +121,9 @@ class Add_File(Cmdlet):
             ],
             detail=[
                 "- Piped row + -path DIR saves to that folder (same fetch engine as file -download).",
-                "- -plugin hydrusnetwork / ftp / ... ingests into a store or host.",
+                "- -plugin hydrusnetwork / ftp / ... ingests into an instance or host.",
                 "- Without a pipe, -path is the source file/directory to ingest.",
-                "- file -download remains for -scrape, yt-dlp, and store export.",
+                "- file -download remains for -scrape, yt-dlp, and instance export.",
             ],
             examples=[
                 '@1 | file -add -path ~/Downloads',

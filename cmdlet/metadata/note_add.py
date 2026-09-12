@@ -33,10 +33,10 @@ class Add_Note(Cmdlet):
     def __init__(self) -> None:
         super().__init__(
             name="add-note",
-            summary="Add file store note",
+            summary="Add a named note to a file in an instance",
             usage=
             'add-note (-query "title:<title>,text:<text>[,instance:<instance>][,hash:<sha256>]") [ -instance <instance> | <piped> ]',
-            alias=[""],
+            alias=[],
             arg=[
                 SharedArgs.INSTANCE,
                 QueryArg(
@@ -52,9 +52,11 @@ class Add_Note(Cmdlet):
                 ),
                 SharedArgs.QUERY,
             ],
-            detail=["""
-                dde
-                """],
+            detail=[
+                "- Requires -instance NAME or a piped row with an instance.",
+                '- Use -query "title:<title>,text:<text>" for note content.',
+                '- Optional -query "hash:<sha256>" targets a specific file.',
+            ],
             exec=self.run,
         )
         # Populate dynamic store choices for autocomplete
@@ -316,7 +318,7 @@ class Add_Note(Cmdlet):
 
             if not store_name:
                 log(
-                    "[add_note] Error: Missing -instance and item has no store field",
+                    "[add_note] Error: Missing -instance",
                     file=sys.stderr
                 )
                 continue

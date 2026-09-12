@@ -77,7 +77,7 @@ class File(Cmdlet):
                 SharedArgs.LIMIT,
             ],
             detail=[
-                "- @N | file -add -path DIR saves the row to disk. @N | file -add -plugin hydrusnetwork ingests into a store.",
+                "- @N | file -add -path DIR saves the row to disk. @N | file -add -plugin hydrusnetwork ingests into an instance.",
                 "- file -download is the fetch/scrape engine; piped -add -path uses it.",
                 "- Prefer: file -search|-add|-delete|... then options (-plugin, -query, ...).",
                 '- Limit via -query field: -query \"cats limit:30\" (not -limit).',

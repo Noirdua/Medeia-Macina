@@ -6,7 +6,7 @@ This file is for humans and coding agents picking up the repo. Prefer it over gu
 
 Medeia-Macina (`mm` / `medeia`) is a **text-first media CLI**: search, download, tag, archive, play, and pipe results between commands. The UX is **plugin-first** and **table-first**: commands emit result tables; `@N` replays a row; `|` pipes into the next cmdlet.
 
-Public name: **plugin**. Internal Python type is `PluginCore.base.Plugin` (`Provider` is an alias). Config is stored under `plugin.*` (legacy `tool` / `provider` / `store` keys are migrated on load).
+Public name: **plugin**. Internal Python type is `PluginCore.base.Plugin` (`Provider` is an alias). Config is stored under `plugin.*`.
 
 Python: **3.10–3.13** (`pyproject.toml` says `>=3.10,<3.15`). Installer: `scripts/bootstrap.py`. Console entry: `scripts.cli_entry:main` → `CLI.MedeiaCLI`.
 

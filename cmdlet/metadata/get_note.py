@@ -35,7 +35,7 @@ class Get_Note(Cmdlet):
                 SharedArgs.QUERY,
             ],
             detail=[
-                "- Notes are retrieved via the selected store backend.",
+                "- Notes are retrieved via the selected instance.",
                 "- Lyrics are stored in a note named 'lyric'.",
             ],
             exec=self.run,
@@ -104,7 +104,7 @@ class Get_Note(Cmdlet):
 
             if not store_name:
                 log(
-                    "[get_note] Error: Missing -instance and item has no store field",
+                    "[get_note] Error: Missing -instance",
                     file=sys.stderr
                 )
                 return 1

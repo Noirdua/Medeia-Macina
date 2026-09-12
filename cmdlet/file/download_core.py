@@ -74,7 +74,7 @@ class Download_File(Cmdlet):
                 CmdletArg(
                     name="name",
                     type="string",
-                    description="Output filename override for store exports.",
+                    description="Output filename override for instance exports.",
                 ),
                 CmdletArg(
                     name="browser",

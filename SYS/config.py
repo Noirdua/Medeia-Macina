@@ -561,7 +561,7 @@ def get_plugin_block(config: Dict[str, Any], name: str) -> Dict[str, Any]:
     plugin_cfg = config.get("plugin")
     if not isinstance(plugin_cfg, dict):
         return {}
-    normalized = _normalize_provider_name(name)
+    normalized = _normalize_plugin_name(name)
     names = [normalized] if normalized else []
     alias_target = _PLUGIN_CONFIG_ALIASES.get(normalized or "")
     if alias_target and alias_target not in names:
@@ -573,7 +573,7 @@ def get_plugin_block(config: Dict[str, Any], name: str) -> Dict[str, Any]:
     for key, block in plugin_cfg.items():
         if not isinstance(block, dict):
             continue
-        if _normalize_provider_name(key) in names:
+        if _normalize_plugin_name(key) in names:
             return block
     return {}
 
@@ -774,7 +774,7 @@ def resolve_debug_log(config: Dict[str, Any]) -> Optional[Path]:
         path = Path.cwd() / path
     return path
 
-def _normalize_provider_name(value: Any) -> Optional[str]:
+def _normalize_plugin_name(value: Any) -> Optional[str]:
     candidate = str(value or "").strip().lower()
     return candidate if candidate else None
 
@@ -794,7 +794,7 @@ def resolve_plugin_asset_path(
     *relative_parts: str,
     script_dir: Optional[Path] = None,
 ) -> Optional[Path]:
-    normalized = _normalize_provider_name(plugin_name)
+    normalized = _normalize_plugin_name(plugin_name)
     if not normalized:
         return None
 
@@ -1067,31 +1067,18 @@ def _canonicalize_plugin_config(config: Dict[str, Any]) -> None:
 
     config.pop("provider", None)
     config.pop("store", None)
+    config.pop("tool", None)
 
-    # Legacy "tool" namespace is retired — fold into plugin and drop.
-    legacy_tool = config.pop("tool", None)
     plugin_block = config.get("plugin")
     if not isinstance(plugin_block, dict):
         plugin_block = {}
-    if isinstance(legacy_tool, dict):
-        for key, value in legacy_tool.items():
-            normalized_key = _normalize_provider_name(key)
-            if not normalized_key:
-                continue
-            if normalized_key not in plugin_block:
-                plugin_block[normalized_key] = value
-            else:
-                plugin_block[normalized_key] = _merge_plugin_branch_values(
-                    plugin_block.get(normalized_key),
-                    value,
-                )
 
     normalized_plugin: Dict[str, Any] = {}
     multi_names = _multi_instance_plugin_names()
 
     if isinstance(plugin_block, dict):
         for key, value in plugin_block.items():
-            normalized_key = _normalize_provider_name(key)
+            normalized_key = _normalize_plugin_name(key)
             if not normalized_key:
                 continue
             if not isinstance(value, dict):
@@ -1279,18 +1266,7 @@ def _config_from_flattened_entries(
                 item_block[key] = value
             continue
 
-        if category == "tool":
-            # Retired namespace: fold into plugin during rebuild.
-            plugin_block = config.setdefault("plugin", {})
-            subtype_block = plugin_block.setdefault(subtype, {})
-            if item_name == "default":
-                subtype_block[key] = value
-            else:
-                item_block = subtype_block.setdefault(item_name, {})
-                item_block[key] = value
-            continue
-
-        if category in {"provider", "store"}:
+        if category in {"provider", "store", "tool"}:
             continue
 
         category_block = config.setdefault(category, {})
@@ -1519,14 +1495,13 @@ def save_config(config: Dict[str, Any]) -> int:
             # Proceed with writing when no conflicting external changes detected
             conn.execute("DELETE FROM config")
             for key, value in config_to_write.items():
-                if key == "tool":
-                    # Retired; never persist tool rows.
+                if key in {"provider", "store", "tool"}:
                     continue
                 if key == "plugin" and isinstance(value, dict):
                     for subtype, instances in value.items():
                         if not isinstance(instances, dict):
                             continue
-                        normalized_subtype = _normalize_provider_name(subtype)
+                        normalized_subtype = _normalize_plugin_name(subtype)
                         if not normalized_subtype:
                             continue
                         write_block = instances
@@ -1570,8 +1545,6 @@ def save_config(config: Dict[str, Any]) -> int:
                                 )
                                 count += 1
                 else:
-                    if key in {"provider", "store"}:
-                        continue
                     if not key.startswith("_") and value is not None:
                         val_str = json.dumps(value) if not isinstance(value, str) else value
                         conn.execute(

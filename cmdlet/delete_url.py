@@ -35,7 +35,7 @@ class Delete_Url(Cmdlet):
                 ),
             ],
             detail=[
-                "- Removes URL association from file identified by hash+store",
+                "- Removes URL association from file identified by hash+instance",
                 "- Multiple url can be comma-separated",
             ],
             exec=self.run,
@@ -82,7 +82,7 @@ class Delete_Url(Cmdlet):
                 )
                 return 1
             if not store_name:
-                log("Error: No store name provided")
+                log("Error: No instance name provided")
                 return 1
 
         # Normalize hash (single-item mode)

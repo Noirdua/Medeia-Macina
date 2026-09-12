@@ -21,7 +21,7 @@ from SYS.result_publication import publish_result_table
 from SYS.result_table import Table
 from SYS.rich_display import stderr_console as get_stderr_console
 from SYS.command_parsing import extract_arg_value
-from SYS.utils import format_bytes, unique_path
+from SYS.utils import unique_path
 from ._pipeobject_utils import get_field, get_pipe_object_path
 
 __all__ = [
@@ -32,14 +32,7 @@ __all__ = [
     "_extract_flag_value",
     "apply_output_path_from_pipeobjects",
     "display_and_persist_items",
-    "fmt_bytes",
 ]
-
-
-def fmt_bytes(n: Optional[int]) -> str:
-    if n is None or n < 0:
-        return "unknown"
-    return format_bytes(n)
 
 
 def _extract_flag_value(args: Sequence[str], *flags: str) -> Optional[str]:

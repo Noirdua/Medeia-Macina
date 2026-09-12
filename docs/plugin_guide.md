@@ -140,8 +140,7 @@ pytest -q
 - Plugin authors should import from `PluginCore.*`.
 
 If a plugin supports multiple configured endpoints or accounts, the user-facing
-concept is a plugin instance. Some stored config still lives under legacy key
-paths such as `provider.<plugin>.<instance>`.
+concept is a plugin instance. Config lives under `plugin.<plugin>.<instance>`.
 
 ---
 

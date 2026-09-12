@@ -141,6 +141,7 @@ class SharedArgs:
         type="string",
         description='Plugin instance via -instance NAME or -query "instance:NAME"',
         query_key="instance",
+        query_aliases=["store"],
         query_only=False,
     )
 
@@ -151,8 +152,6 @@ class SharedArgs:
 
         SharedArgs._refresh_instance_choices_cache(config, skip_instantiation=False)
         return SharedArgs._cached_available_instances or []
-
-    get_store_choices = get_instance_choices
 
     @staticmethod
     def _refresh_instance_choices_cache(config: Optional[Dict[str, Any]] = None, skip_instantiation: bool = False) -> None:
@@ -181,8 +180,6 @@ class SharedArgs:
                 pass
         except Exception:
             SharedArgs._cached_available_instances = []
-
-    _refresh_store_choices_cache = _refresh_instance_choices_cache
 
     DELETE = CmdletArg(
         "delete",

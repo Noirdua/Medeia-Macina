@@ -50,8 +50,8 @@ class Get_Url(Cmdlet):
                  SharedArgs.INSTANCE,
                  SharedArgs.URL],
             detail=[
-                "- Get url for file: @1 | get-url (requires hash+store from result)",
-                '- Search url across stores: get-url -url "www.google.com" (strips protocol & www prefix)',
+                "- Get url for file: @1 | get-url (requires hash+instance from result)",
+                '- Search url across instances: get-url -url "www.google.com" (strips protocol & www prefix)',
                 '- Wildcard matching: get-url -url "youtube.com*" (matches all youtube.com urls)',
                 "- Pattern matching: domain matching ignores protocol (https://, http://, ftp://)",
             ],
@@ -503,7 +503,7 @@ class Get_Url(Cmdlet):
             return 1
 
         if not store_name:
-            log("Error: No store name provided")
+            log("Error: No instance name provided")
             return 1
 
         # Get backend and retrieve url

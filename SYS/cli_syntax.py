@@ -126,14 +126,13 @@ def _validate_add_note_requires_add_file_order(raw: str) -> Optional[SyntaxError
             has_hash = _has_flag(tokens, "-hash", "--hash")
             has_store = _has_flag(tokens, "-instance", "--instance")
 
-            # Also accept explicit targeting via -query "store:<store> hash:<sha256> ...".
             query_val = _get_flag_value(tokens, "-query", "--query")
             has_store_hash_in_query = False
             if query_val:
                 try:
                     parsed_q = parse_query(str(query_val))
-                    q_hash = get_field(parsed_q, "hash") or get_field(parsed_q, "sha256")
-                    q_store = get_field(parsed_q, "store")
+                    q_hash = get_query_field(parsed_q, "hash") or get_query_field(parsed_q, "sha256")
+                    q_store = get_query_field(parsed_q, "instance") or get_query_field(parsed_q, "store")
                     has_store_hash_in_query = bool(
                         str(q_hash or "").strip() and str(q_store or "").strip()
                     )
@@ -145,7 +144,7 @@ def _validate_add_note_requires_add_file_order(raw: str) -> Optional[SyntaxError
             return SyntaxErrorDetail(
                 "Pipeline error: 'add-note' must come after 'add-file' when used with piped input. "
                 "Move 'add-note' after 'add-file', or call it with explicit targeting: "
-                'add-note -query "store:<store> hash:<sha256> title:<title>,text:<text>".'
+                'add-note -query "instance:<instance> hash:<sha256> title:<title>,text:<text>".'
             )
 
     return None

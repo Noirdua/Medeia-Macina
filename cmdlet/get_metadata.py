@@ -37,7 +37,7 @@ class Get_Metadata(Cmdlet):
             detail=[
                 "- Retrieves metadata from storage backend using file hash as identifier.",
                 "- Shows hash, MIME type, size, duration/pages, known url, and import timestamp.",
-                "- Hash and store are taken from piped result or can be overridden with -query/-instance flags.",
+                "- Hash and instance are taken from piped result or can be overridden with -query/-instance flags.",
                 "- All metadata is retrieved from the storage backend's database (single source of truth).",
             ],
             exec=self.run,

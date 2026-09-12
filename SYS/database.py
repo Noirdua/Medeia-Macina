@@ -565,19 +565,8 @@ def rows_to_config(rows) -> Dict[str, Any]:
                 else:
                     name_dict = sub_dict.setdefault(name, {})
                     name_dict[key] = parsed_val
-            elif cat in ('provider', 'store'):
+            elif cat in ('provider', 'store', 'tool'):
                 continue
-            elif cat == 'tool':
-                # Retired namespace: load legacy tool rows into plugin.
-                cat_dict = config.setdefault('plugin', {})
-                sub_dict = cat_dict.setdefault(sub, {})
-                if str(name or '').strip().lower() == 'default':
-                    if key not in sub_dict:
-                        sub_dict[key] = parsed_val
-                else:
-                    name_dict = sub_dict.setdefault(name, {})
-                    if key not in name_dict:
-                        name_dict[key] = parsed_val
             else:
                 config.setdefault(cat, {})[key] = parsed_val
 

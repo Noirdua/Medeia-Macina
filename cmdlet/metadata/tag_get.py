@@ -367,7 +367,7 @@ def _run_impl(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
     )
     if not query_valid:
         return 1
-    store_key = parsed_args.get("store")
+    store_key = parsed_args.get("instance") or parsed_args.get("store")
     emit_requested = parsed_args.get("emit", False)
     
     # Only use emit mode if explicitly requested with --emit flag, not just because we're in a pipeline
@@ -997,7 +997,7 @@ class Get_Tag(Cmdlet):
             name="tag",
             summary="Get tag values from Hydrus or local sidecar metadata",
             usage=
-            'metadata -get [-query "hash:<sha256>"] [--instance <key>] [--emit] [-scrape <url|provider>]',
+            'metadata -get [-query "hash:<sha256>"] [--instance <key>] [--emit] [-scrape <url|plugin>]',
             alias=[],
             arg=[
                 SharedArgs.QUERY,
@@ -1017,7 +1017,7 @@ class Get_Tag(Cmdlet):
                     name="-scrape",
                     type="string",
                     description=
-                    "Scrape metadata from a URL or provider; with no value, use the default subject-scrape provider",
+                    "Scrape metadata from a URL or plugin; with no value, use the default subject-scrape plugin",
                     required=False,
                     choices=_SCRAPE_CHOICES,
                 ),

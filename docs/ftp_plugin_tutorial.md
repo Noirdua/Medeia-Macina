@@ -25,11 +25,10 @@ storage-style integration:
 
 ## Example config
 
-Add one or more named FTP plugin instances to your config. The current stored
-key path remains `provider.ftp.<instance>` for legacy compatibility:
+Add one or more named FTP plugin instances to your config under `plugin.ftp.<instance>`:
 
 ```toml
-[provider.ftp.work]
+[plugin.ftp.work]
 host = "ftp.example.com"
 port = 21
 username = "demo"
@@ -40,7 +39,7 @@ passive = true
 timeout = 20
 search_depth = 1
 
-[provider.ftp.archive]
+[plugin.ftp.archive]
 host = "archive.example.com"
 port = 2121
 username = "archive-bot"

@@ -54,8 +54,6 @@ class CmdletIntrospection:
         except Exception:
             return []
 
-    store_choices = instance_choices
-
     @classmethod
     def arg_choices(cls,
                     *,
@@ -70,7 +68,7 @@ class CmdletIntrospection:
             if normalized_arg in ("storage", "store", "instance"):
                 # Use cached/lightweight names for completions to avoid instantiating backends
                 # (instantiating backends may perform heavy initialization).
-                backends = cls.store_choices(config, force=False)
+                backends = cls.instance_choices(config, force=False)
                 if backends:
                     return backends
 
@@ -1762,7 +1760,7 @@ class CmdletCompleter(Completer):
                             "download-file",
                         } or cmd_name == "file"
                         if not instance_choices and not file_like:
-                            instance_choices = CmdletIntrospection.store_choices(config)
+                            instance_choices = CmdletIntrospection.instance_choices(config)
                         list_partial = str(partial or "")
                         already: List[str] = []
                         current_name = list_partial

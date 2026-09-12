@@ -19,11 +19,10 @@ The SCP plugin mirrors the FTP walkthrough, but on top of SSH:
 
 ## Example config
 
-Add one or more named SCP plugin instances to your config. The current stored
-key path remains `provider.scp.<instance>` for legacy compatibility:
+Add one or more named SCP plugin instances to your config under `plugin.scp.<instance>`:
 
 ```toml
-[provider.scp.work]
+[plugin.scp.work]
 host = "ssh.example.com"
 port = 22
 username = "deploy"
@@ -35,7 +34,7 @@ search_depth = 1
 allow_agent = true
 look_for_keys = true
 
-[provider.scp.archive]
+[plugin.scp.archive]
 host = "ssh-archive.example.com"
 port = 2222
 username = "archive"

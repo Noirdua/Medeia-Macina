@@ -1030,7 +1030,7 @@ def _iter_storage_export_refs(
     explicit_store = str(parsed.get("instance") or "").strip()
     if query_hash:
         if not explicit_store:
-            log('Error: No store name provided', file=sys.stderr)
+            log('Error: No instance name provided', file=sys.stderr)
             return [], list(piped_items or []), 1
         refs.append(
             {

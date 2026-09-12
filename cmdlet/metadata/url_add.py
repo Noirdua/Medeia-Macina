@@ -25,7 +25,7 @@ class Add_Url(sh.Cmdlet):
                              description="URL to associate"),
             ],
             detail=[
-                "- Associates URL with file identified by hash+store",
+                "- Associates URL with file identified by hash+instance",
                 "- Multiple url can be comma-separated",
             ],
             exec=self.run,
@@ -95,7 +95,7 @@ class Add_Url(sh.Cmdlet):
                 )
                 return 1
             if not store_name:
-                log("Error: No store name provided")
+                log("Error: No instance name provided")
                 return 1
 
         if not url_arg:

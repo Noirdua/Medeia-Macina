@@ -37,7 +37,7 @@ class Delete_Note(Cmdlet):
                 ),
             ],
             detail=[
-                "- Deletes the named note from the selected store backend.",
+                "- Deletes the named note from the selected instance.",
             ],
             exec=self.run,
         )
@@ -115,7 +115,7 @@ class Delete_Note(Cmdlet):
 
             if not store_name:
                 log(
-                    "[delete_note] Error: Missing -instance and item has no store field",
+                    "[delete_note] Error: Missing -instance",
                     file=sys.stderr,
                 )
                 return 1

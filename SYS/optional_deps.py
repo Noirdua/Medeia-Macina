@@ -179,24 +179,19 @@ def ensure_deno(version: Optional[str] = None) -> Tuple[bool, str]:
 
 
 def maybe_auto_install_configured_tools(config: Dict[str, Any]) -> None:
-    """Best-effort dependency auto-installer for configured tools and providers.
+    """Best-effort dependency auto-installer for configured plugins.
 
     This is intentionally conservative:
     - Only acts when a configuration block is present/enabled.
     - Skips under pytest.
 
-    Current supported features: FlorenceVision tool, Telegram provider, Soulseek provider
+    Current supported features: FlorenceVision, Telegram, Soulseek
     """
     if _is_pytest():
         return
 
     plugin_cfg = (config or {}).get("plugin")
-    legacy_tool_cfg = (config or {}).get("tool")
-    fv = None
-    if isinstance(plugin_cfg, dict):
-        fv = plugin_cfg.get("florencevision")
-    if fv is None and isinstance(legacy_tool_cfg, dict):
-        fv = legacy_tool_cfg.get("florencevision")
+    fv = plugin_cfg.get("florencevision") if isinstance(plugin_cfg, dict) else None
     if isinstance(fv, dict) and _as_bool(fv.get("enabled"), False):
         auto_install = _as_bool(fv.get("auto_install"), True)
         if auto_install:
@@ -206,7 +201,7 @@ def maybe_auto_install_configured_tools(config: Dict[str, Any]) -> None:
 
     provider_missing = _provider_missing_modules(config)
     for provider_name, requirements in provider_missing.items():
-        label = f"{provider_name.title()} provider"
+        label = f"{provider_name.title()} plugin"
         _install_requirements(label, requirements)
 
 

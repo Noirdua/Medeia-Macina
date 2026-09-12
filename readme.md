@@ -4,7 +4,7 @@
 
 Medeia-Macina is a text-first media manager and plugin runtime for searching, downloading, tagging, archiving, replaying, and moving media through one CLI. It is built around pipeable commands, rich result tables, and row replay so you can move from search to action without leaving the terminal.
 
-The current UX is plugin-first. Configuration is under `.config` → Plugins (legacy `tool`/`provider`/`store` namespaces are migrated into `plugin` automatically).
+The current UX is plugin-first. Configuration is under `.config` → Plugins (`plugin.*`).
 
 ## What Medeia-Macina Does
 

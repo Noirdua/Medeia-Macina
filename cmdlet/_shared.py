@@ -96,7 +96,6 @@ from ._display import (
     _extract_flag_value,
     apply_output_path_from_pipeobjects,
     display_and_persist_items,
-    fmt_bytes,
 )
 
 from ._store_utils import (

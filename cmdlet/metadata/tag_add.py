@@ -822,7 +822,7 @@ class Add_Tag(Cmdlet):
             ],
             detail=[
                 "- By default, only tag non-temporary files (from pipelines). Use --all to tag everything.",
-                "- Requires a store backend: use -instance or pipe items that include store.",
+                "- Requires an instance: use -instance or pipe items that include an instance.",
                 "- If -query is not provided, uses the piped item's hash (or derives from its path when possible).",
                 "- Multiple tag can be comma-separated or space-separated.",
                 "- Use -list to include predefined tag lists from adjective.json: -list philosophy,occult",

@@ -2173,7 +2173,7 @@ class PipelineExecutor:
                             else:
                                 try:
                                     debug(
-                                        f"Selection sample object: provider={getattr(sample, 'provider', None)} store={getattr(sample, 'store', None)}"
+                                        f"Selection sample object: plugin={getattr(sample, 'plugin', None)} store={getattr(sample, 'store', None)}"
                                     )
                                 except Exception:
                                     logger.exception(

@@ -532,7 +532,7 @@ def get_cmdlet_arg_choices(
                                 if choices:
                                     return choices
                             except Exception as exc:
-                                logger.exception("Matrix provider failed while listing rooms: %s", exc)
+                                logger.exception("Matrix plugin failed while listing rooms: %s", exc)
                     except Exception as exc:
                         logger.exception("Failed to initialize Matrix plugin: %s", exc)
             except Exception as exc:

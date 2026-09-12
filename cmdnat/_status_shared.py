@@ -106,9 +106,6 @@ def has_plugin(cfg: dict, name: str) -> bool:
     return isinstance(block, dict) and bool(block)
 
 
-has_provider = has_plugin
-
-
 def ping_url(url: str, timeout: float = 3.0) -> tuple[bool, str]:
     try:
         from API.HTTP import HTTPClient
@@ -221,7 +218,3 @@ def collect_plugin_startup_checks(config: dict) -> list[dict[str, Any]]:
         )
 
     return checks
-
-
-provider_display_name = plugin_display_name
-default_provider_ping_targets = default_plugin_ping_targets

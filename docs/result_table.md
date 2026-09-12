@@ -38,8 +38,7 @@ has handled the selection, for example by publishing a nested table.
 
 ### Table metadata
 `ResultTable.set_table_metadata(dict)` attaches plugin-specific context for
-selectors and follow-up stages. You will still see legacy keys such as
-`provider` in some metadata because parts of the runtime still consume them.
+selectors and follow-up stages.
 
 ---
 

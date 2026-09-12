@@ -1232,7 +1232,7 @@ class CLI:
         except Exception:
             pass
 
-        # Initialize the store choices cache at startup (filters disabled stores)
+        # Initialize the instance choices cache at startup
         try:
             from SYS.cmdlet_spec import SharedArgs
             config = self._config_loader.load()

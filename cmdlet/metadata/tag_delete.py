@@ -697,7 +697,7 @@ def _process_deletion(
 
     if not store_name:
         log(
-            "Store is required (use -instance or pipe a result with store)",
+            "Instance is required (use -instance or pipe a result with an instance)",
             file=sys.stderr
         )
         return False
