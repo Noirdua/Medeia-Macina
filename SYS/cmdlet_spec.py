@@ -170,12 +170,9 @@ class SharedArgs:
                 return
 
             try:
-                from PluginCore.backend_registry import BackendRegistry
+                from PluginCore.backend_registry import list_configured_backend_names
 
-                registry = BackendRegistry(config=config, suppress_debug=True)
-                available = registry.list_backends()
-                if available:
-                    SharedArgs._cached_available_instances = available
+                SharedArgs._cached_available_instances = list_configured_backend_names(config)
             except Exception:
                 pass
         except Exception:

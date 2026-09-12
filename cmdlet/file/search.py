@@ -1144,10 +1144,10 @@ class search_file(Cmdlet):
                         backends_to_try = list_configured_backend_names(config or {})
 
                     found_any = False
+                    backend_registry_cache = None
                     for h in hash_query:
                         resolved_backend_name: Optional[str] = None
                         resolved_backend = None
-                        backend_registry_cache = None
 
                         for backend_name in backends_to_try:
                             backend, backend_registry_cache, _exc = get_preferred_store_backend(

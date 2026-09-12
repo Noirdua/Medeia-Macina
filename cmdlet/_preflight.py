@@ -31,9 +31,9 @@ def get_store_backend(
     registry = store_registry
     if registry is None:
         try:
-            from PluginCore.backend_registry import BackendRegistry
+            from PluginCore.backend_registry import get_or_create_registry
 
-            registry = BackendRegistry(config or {}, suppress_debug=suppress_debug)
+            registry = get_or_create_registry(config or {}, suppress_debug=suppress_debug)
         except Exception as exc:
             return None, None, exc
 
@@ -54,7 +54,16 @@ def get_preferred_store_backend(
     store_registry: Any = None,
     suppress_debug: bool = True,
 ) -> Tuple[Optional[Any], Any, Optional[Exception]]:
-    """Prefer a targeted backend instance before falling back to registry lookup."""
+    """Prefer a reused registry lookup before constructing a one-off backend."""
+    backend, registry, lookup_exc = get_store_backend(
+        config,
+        store_name,
+        store_registry=store_registry,
+        suppress_debug=suppress_debug,
+    )
+    if backend is not None:
+        return backend, registry, None
+
     direct_exc: Optional[Exception] = None
     try:
         from PluginCore.backend_registry import get_backend_instance
@@ -65,16 +74,7 @@ def get_preferred_store_backend(
             suppress_debug=suppress_debug,
         )
         if backend is not None:
-            return backend, store_registry, None
+            return backend, registry, None
     except Exception as exc:
         direct_exc = exc
-
-    backend, registry, lookup_exc = get_store_backend(
-        config,
-        store_name,
-        store_registry=store_registry,
-        suppress_debug=suppress_debug,
-    )
-    if backend is not None:
-        return backend, registry, None
     return None, registry, direct_exc or lookup_exc

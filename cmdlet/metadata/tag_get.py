@@ -451,9 +451,9 @@ def _run_impl(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
         backend = None
         if is_store_backed:
             try:
-                from PluginCore.backend_registry import BackendRegistry
+                from PluginCore.backend_registry import get_or_create_registry
 
-                storage = BackendRegistry(config, suppress_debug=True)
+                storage = get_or_create_registry(config, suppress_debug=True)
                 backend = storage[str(store_name)]
             except Exception:
                 backend = None
@@ -470,9 +470,9 @@ def _run_impl(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
         store_for_scrape = get_field(result, "store", None)
         if file_hash_for_scrape and store_for_scrape:
             try:
-                from PluginCore.backend_registry import BackendRegistry
+                from PluginCore.backend_registry import get_or_create_registry
 
-                storage = BackendRegistry(config, suppress_debug=True)
+                storage = get_or_create_registry(config, suppress_debug=True)
                 backend = storage[str(store_for_scrape)]
                 current_tags, _src = backend.get_tag(file_hash_for_scrape, config=config)
                 if isinstance(current_tags, (list, tuple, set)) and current_tags:
@@ -794,9 +794,9 @@ def _run_impl(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
             )
             return 0
         try:
-            from PluginCore.backend_registry import BackendRegistry
+            from PluginCore.backend_registry import get_or_create_registry
 
-            storage = BackendRegistry(config, suppress_debug=True)
+            storage = get_or_create_registry(config, suppress_debug=True)
             backend = storage[str(store_name)]
             ok = bool(backend.add_tag(file_hash, apply_tags, config=config))
             if not ok:
@@ -926,9 +926,9 @@ def _run_impl(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
 
     # Get tags using storage backend
     try:
-        from PluginCore.backend_registry import BackendRegistry
+        from PluginCore.backend_registry import get_or_create_registry
 
-        storage = BackendRegistry(config, suppress_debug=True)
+        storage = get_or_create_registry(config, suppress_debug=True)
         backend = storage[store_name]
         current, source = backend.get_tag(file_hash, config=config)
         current = list(current or [])

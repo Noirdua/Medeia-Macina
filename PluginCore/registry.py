@@ -33,16 +33,22 @@ _plugin_instance_cache: Dict[Tuple[str, str], Optional[Plugin]] = {}
 _plugin_cache_lock = __import__("threading").Lock()
 
 
-def _config_fingerprint(config: Optional[Dict[str, Any]]) -> str:
-    """Create a stable fingerprint of config for caching purposes."""
+def _config_fingerprint(config: Optional[Dict[str, Any]], plugin_name: str = "") -> str:
     if config is None:
         return "none"
     try:
         import json
-        normalized = json.dumps(config, sort_keys=True, default=str)
+        payload: Any = config
+        if isinstance(config, dict):
+            plugin_block = config.get("plugin")
+            if plugin_name and isinstance(plugin_block, dict):
+                payload = plugin_block.get(str(plugin_name).strip().lower())
+            elif isinstance(plugin_block, dict):
+                payload = plugin_block
+        normalized = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.md5(normalized.encode()).hexdigest()[:16]
     except Exception:
-        return "unknown"
+        return f"id:{id(config)}"
 
 
 def _class_supports_method(
@@ -715,7 +721,7 @@ def get_plugin(name: str, config: Optional[Dict[str, Any]] = None) -> Optional[P
         return None
 
     # Check cache first
-    cache_key = (str(name).strip().lower(), _config_fingerprint(config))
+    cache_key = (str(name).strip().lower(), _config_fingerprint(config, str(name)))
     with _plugin_cache_lock:
         if cache_key in _plugin_instance_cache:
             return _plugin_instance_cache[cache_key]
@@ -814,17 +820,8 @@ def _info_has_configured_plugin_entry(
         else (config_dict.get("plugin") or {})  # type: ignore[assignment]
     )
 
-    if info.is_multi_instance:
-        try:
-            plugin_obj = info.plugin_class(config_dict)
-            instances = plugin_obj.configured_instances()
-            # Treat explicit multi-instance names as configured, but also allow
-            # a default/single config block for multi-instance plugins.
-            return bool(instances or plugin_obj.plugin_config_root())
-        except Exception:
-            return False
-
-    return isinstance(section.get(info.canonical_name.lower()), dict)
+    entry = section.get(info.canonical_name.lower())
+    return isinstance(entry, dict) and bool(entry)
 
 
 def list_plugin_names_for_cmdlet(
@@ -1049,6 +1046,18 @@ def clear_plugin_cache() -> None:
     global _plugin_instance_cache
     with _plugin_cache_lock:
         _plugin_instance_cache.clear()
+    try:
+        from SYS.config import _multi_instance_plugin_names
+
+        _multi_instance_plugin_names.cache_clear()
+    except Exception:
+        pass
+    try:
+        from PluginCore.backend_registry import clear_registry_cache
+
+        clear_registry_cache()
+    except Exception:
+        pass
 
 
 def refresh_discovered_plugins() -> None:

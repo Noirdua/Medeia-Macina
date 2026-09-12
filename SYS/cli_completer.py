@@ -277,8 +277,7 @@ class CmdletCompleter(Completer):
             str(arg_name or "").lower(),
             self._config_cache_key(config),
         )
-        live_plugin = str(arg_name or "").lstrip("-").strip().lower() == "plugin"
-        if not force and not live_plugin:
+        if not force:
             cached = self._arg_choices_cache.get(key)
             if cached is not None:
                 return cached
@@ -321,6 +320,9 @@ class CmdletCompleter(Completer):
             self._config_cache_key(config),
             bool(configured_only),
         )
+        cached = self._plugins_for_cmdlet_cache.get(key)
+        if cached is not None:
+            return cached
         value = CmdletIntrospection.plugin_names_for_cmdlet(
             cmd_name,
             config,

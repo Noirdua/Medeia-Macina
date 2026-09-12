@@ -21,6 +21,7 @@ _PLUGIN_DISCOVERED_CLASSES_CACHE: Dict[str, Optional[Type[BackendBase]]] = {}
 # Keyed by (backend_type, instance_key) where instance_key is the configured name
 # under config.plugin.<type>.<instance_key>.
 _FAILED_BACKEND_CACHE: Dict[tuple[str, str], str] = {}
+_REGISTRY_BY_CONFIG_ID: Dict[int, "BackendRegistry"] = {}
 
 
 def _normalize_backend_type(value: str) -> str:
@@ -376,6 +377,24 @@ class BackendRegistry:
             return bool(ok) if ok is not None else True
         except Exception:
             return False
+
+
+def clear_registry_cache() -> None:
+    _REGISTRY_BY_CONFIG_ID.clear()
+
+
+def get_or_create_registry(
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    suppress_debug: bool = True,
+) -> BackendRegistry:
+    cfg = config or {}
+    cached = _REGISTRY_BY_CONFIG_ID.get(id(cfg))
+    if cached is not None:
+        return cached
+    registry = BackendRegistry(cfg, suppress_debug=suppress_debug)
+    _REGISTRY_BY_CONFIG_ID[id(cfg)] = registry
+    return registry
 
 
 def list_configured_backend_names(config: Optional[Dict[str, Any]]) -> list[str]:

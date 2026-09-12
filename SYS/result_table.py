@@ -2418,9 +2418,9 @@ def extract_item_metadata(item: Any) -> Dict[str, Any]:
         if hash_val and store_val:
             try:
                 from SYS.config import load_config
-                from PluginCore.backend_registry import BackendRegistry
-                cfg = load_config()
-                br = BackendRegistry(cfg, suppress_debug=True)
+                from PluginCore.backend_registry import get_or_create_registry
+                cfg = load_config(emit_summary=False)
+                br = get_or_create_registry(cfg, suppress_debug=True)
                 if br.is_available(str(store_val)):
                     backend = br[str(store_val)]
                     if not out.get("Plugin"):

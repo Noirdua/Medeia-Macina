@@ -9,7 +9,7 @@ from pathlib import Path
 
 from SYS.logger import debug, log
 from PluginCore.registry import get_plugin, plugin_for_storage
-from PluginCore.backend_registry import BackendRegistry
+
 from .. import _shared as sh
 from SYS import pipeline as ctx
 from SYS.result_table_helpers import add_row_columns
@@ -63,6 +63,7 @@ class Delete_File(sh.Cmdlet):
         config: Dict[str,
                      Any],
         skip_hydrus_hashes: Optional[set[str]] = None,
+        registry: Any = None,
     ) -> List[Dict[str,
                    Any]]:
         """Process deletion for a single item.
@@ -156,7 +157,10 @@ class Delete_File(sh.Cmdlet):
         backend = None
         try:
             if store:
-                registry = BackendRegistry(config)
+                if registry is None:
+                    from PluginCore.backend_registry import get_or_create_registry
+
+                    registry = get_or_create_registry(config, suppress_debug=True)
                 if registry.is_available(str(store)):
                     backend = registry[str(store)]
         except Exception:
@@ -242,7 +246,10 @@ class Delete_File(sh.Cmdlet):
             try:
                 # Re-use an already resolved backend when available.
                 if backend is None:
-                    registry = BackendRegistry(config)
+                    if registry is None:
+                        from PluginCore.backend_registry import get_or_create_registry
+
+                        registry = get_or_create_registry(config, suppress_debug=True)
                     if registry.is_available(str(store)):
                         backend = registry[str(store)]
 
@@ -534,6 +541,12 @@ class Delete_File(sh.Cmdlet):
                             skip_hydrus_hashes.update(hashes)
                     except Exception:
                         pass
+        try:
+            from PluginCore.backend_registry import get_or_create_registry
+
+            shared_registry = get_or_create_registry(config, suppress_debug=True)
+        except Exception:
+            shared_registry = None
         for item in items:
             rows = self._process_single_item(
                 item,
@@ -543,6 +556,7 @@ class Delete_File(sh.Cmdlet):
                 reason,
                 config,
                 skip_hydrus_hashes=skip_hydrus_hashes,
+                registry=shared_registry,
             )
             if rows:
                 success_count += 1

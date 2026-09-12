@@ -8,6 +8,7 @@ import time
 import os
 import re
 import datetime
+from functools import lru_cache
 import shutil
 import sys
 import tempfile
@@ -314,6 +315,13 @@ def clear_config_cache() -> None:
     _CONFIG_CACHE = {}
     _LAST_SAVED_CONFIG = {}
     _CONFIG_SUMMARY_PENDING = False
+    _multi_instance_plugin_names.cache_clear()
+    try:
+        from PluginCore.backend_registry import clear_registry_cache
+
+        clear_registry_cache()
+    except Exception:
+        pass
 
 
 def _log_config_load_summary(config: Dict[str, Any]) -> None:
@@ -812,18 +820,19 @@ def resolve_plugin_asset_path(
     return None
 
 
-def _multi_instance_plugin_names() -> set[str]:
+@lru_cache(maxsize=1)
+def _multi_instance_plugin_names() -> frozenset[str]:
     """Return canonical multi-instance plugin names (best-effort)."""
     try:
         from SYS.plugin_config import get_configurable_store_types
 
-        return {
+        return frozenset(
             str(name).strip().lower()
             for name in (get_configurable_store_types() or [])
             if str(name).strip()
-        }
+        )
     except Exception:
-        return set()
+        return frozenset()
 
 
 def _plugin_schema_field_keys(plugin_name: str) -> set[str]:
@@ -1157,8 +1166,6 @@ def _sync_alldebrid_api_key(config: Dict[str, Any]) -> None:
     """
     if not isinstance(config, dict):
         return
-
-    _canonicalize_plugin_config(config)
 
     plugins = config.get("plugin")
     if not isinstance(plugins, dict):
