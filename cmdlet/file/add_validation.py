@@ -52,7 +52,7 @@ def _resolve_backend_by_name(instance: Any, backend_name: str) -> Optional[Any]:
     return None
 
 
-def _build_provider_filename(
+def _build_plugin_filename(
     pipe_obj: models.PipeObject,
     fallback_hash: Optional[str] = None,
     source_url: Optional[str] = None,
@@ -240,7 +240,7 @@ def _download_remote_backend_url(
             tmp_dir = Path(tempfile.mkdtemp(prefix="add-file-src-"))
             download_root = tmp_dir
 
-        suggested_name = _build_provider_filename(
+        suggested_name = _build_plugin_filename(
             pipe_obj,
             fallback_hash=file_hash,
             source_url=url_text,
@@ -302,7 +302,7 @@ def _maybe_download_plugin_result(
         get_field(result, "table"),
         extra_table,
     ):
-        candidate = Add_File._normalize_provider_key(source)
+        candidate = Add_File._normalize_plugin_key(source)
         if candidate:
             plugin_key = candidate
             break
@@ -318,7 +318,7 @@ def _maybe_download_plugin_result(
             try:
                 from PluginCore.registry import match_plugin_name_for_url
 
-                plugin_key = Add_File._normalize_provider_key(match_plugin_name_for_url(url_hint))
+                plugin_key = Add_File._normalize_plugin_key(match_plugin_name_for_url(url_hint))
             except Exception:
                 plugin_key = None
     if not plugin_key:
@@ -373,7 +373,7 @@ def _download_piped_source(
             if source_url.lower().startswith(("http://", "https://")):
                 download_dir = Path(tempfile.mkdtemp(prefix="add-file-src-"))
                 try:
-                    filename = _build_provider_filename(
+                    filename = _build_plugin_filename(
                         pipe_obj,
                         str(r_hash),
                         source_url,
@@ -390,7 +390,7 @@ def _download_piped_source(
                         pipe_obj.path = str(downloaded_path)
                         return downloaded_path, str(r_hash), download_dir
                 except Exception as exc:
-                    debug(f"[add-file] Provider download failed: {exc}")
+                    debug(f"[add-file] Plugin download failed: {exc}")
                 try:
                     shutil.rmtree(download_dir, ignore_errors=True)
                 except Exception:

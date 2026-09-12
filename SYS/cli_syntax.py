@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 import re
 
+from SYS.command_parsing import extract_arg_value
+
 
 @dataclass(frozen=True)
 class SyntaxErrorDetail:
@@ -98,26 +100,7 @@ def _has_flag(tokens: list[str], *flags: str) -> bool:
 
 
 def _get_flag_value(tokens: list[str], *flags: str) -> Optional[str]:
-    """Return the value for a flag from tokenized args.
-
-    Supports:
-      - -flag value
-      - --flag value
-      - -flag=value
-      - --flag=value
-    """
-    want = {str(f).strip().lower() for f in flags if str(f).strip()}
-    if not want:
-        return None
-    for idx, tok in enumerate(tokens):
-        low = str(tok).strip().lower()
-        if "=" in low:
-            head, val = low.split("=", 1)
-            if head.strip() in want:
-                return tok.split("=", 1)[1]
-        if low in want and idx + 1 < len(tokens):
-            return tokens[idx + 1]
-    return None
+    return extract_arg_value(tokens, flags=flags)
 
 
 def _validate_add_note_requires_add_file_order(raw: str) -> Optional[SyntaxErrorDetail]:
@@ -450,12 +433,13 @@ def parse_query(query: str) -> Dict[str, Any]:
     return result
 
 
-def get_field(
+def get_query_field(
     parsed_query: Dict[str, Any], field_name: str, default: Optional[str] = None
 ) -> Optional[str]:
-    """Get a field value from a parsed query."""
-
     return parsed_query.get("fields", {}).get((field_name or "").lower(), default)
+
+
+get_field = get_query_field
 
 
 def get_free_text(parsed_query: Dict[str, Any]) -> str:

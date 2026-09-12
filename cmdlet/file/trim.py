@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from SYS.logger import log, debug
 from SYS.item_accessors import get_store_name
-from SYS.utils import sha256_file
+from SYS.utils import sanitize_filename, sha256_file
 from PluginCore.backend_registry import BackendRegistry
 from .. import _shared as sh
 
@@ -136,11 +136,6 @@ def _parse_time(time_str: str) -> float:
         return float(parts[0])
 
     raise ValueError(f"Invalid time format: {time_str}")
-
-
-def _sanitize_filename(name: str, *, max_len: int = 140) -> str:
-    from SYS.utils import sanitize_filename
-    return sanitize_filename(name, max_len=max_len, fallback="clip")
 
 
 def _extract_store_name(item: Any) -> Optional[str]:
@@ -329,7 +324,7 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
             # Prefer title from metadata if present
             title = extract_title_from_result(item)
             if title:
-                base_name = _sanitize_filename(str(title))
+                base_name = sanitize_filename(str(title), max_len=140, fallback="clip")
             else:
                 base_name = time.strftime("%Y%m%d-%H%M%S")
 

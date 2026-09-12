@@ -17,7 +17,6 @@ Sub-modules:
 
 from __future__ import annotations
 
-import tempfile
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -35,6 +34,7 @@ from rich.prompt import Confirm
 
 from ._tag_utils import (
     set_tag_groups_path,
+    _normalize_hash_cached,
     normalize_hash,
     looks_like_hash,
     parse_tag_arguments,
@@ -77,7 +77,6 @@ from ._url_utils import (
     merge_urls,
     remove_urls,
     set_item_urls,
-    register_url_with_local_library,
 )
 
 from ._template_utils import (
@@ -172,7 +171,8 @@ def resolve_target_dir(
             out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir
     except Exception:
-        p = Path(tempfile.gettempdir()) / "Medios-Macina"
+        from SYS.utils import default_staging_dir
+        p = default_staging_dir()
         if handle_creations:
             p.mkdir(parents=True, exist_ok=True)
         return p

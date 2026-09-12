@@ -20,6 +20,8 @@ from SYS.logger import log
 from SYS.result_publication import publish_result_table
 from SYS.result_table import Table
 from SYS.rich_display import stderr_console as get_stderr_console
+from SYS.command_parsing import extract_arg_value
+from SYS.utils import format_bytes, unique_path
 from ._pipeobject_utils import get_field, get_pipe_object_path
 
 __all__ = [
@@ -35,72 +37,17 @@ __all__ = [
 
 
 def fmt_bytes(n: Optional[int]) -> str:
-    """Format bytes as human-readable with 1 decimal place (MB/GB).
-
-    Args:
-            n: Number of bytes, or None
-
-    Returns:
-            Formatted string like "1.5 MB" or "2.0 GB", or "unknown"
-    """
     if n is None or n < 0:
         return "unknown"
-    gb = n / (1024.0 * 1024.0 * 1024.0)
-    if gb >= 1.0:
-        return f"{gb:.1f} GB"
-    mb = n / (1024.0 * 1024.0)
-    return f"{mb:.1f} MB"
+    return format_bytes(n)
 
 
 def _extract_flag_value(args: Sequence[str], *flags: str) -> Optional[str]:
-    """Return the value for the first matching flag in args.
-
-    This is intentionally lightweight (no cmdlet spec required) so callers in CLI/pipeline
-    can share the same behavior.
-    """
-    if not args:
-        return None
-    want = {str(f).strip().lower()
-            for f in flags if str(f).strip()}
-    if not want:
-        return None
-    try:
-        tokens = [str(a) for a in args]
-    except Exception:
-        tokens = list(args)  # type: ignore[list-item]
-    for i, tok in enumerate(tokens):
-        low = str(tok).strip().lower()
-        if low in want:
-            if i + 1 >= len(tokens):
-                return None
-            nxt = str(tokens[i + 1])
-            if not nxt.strip():
-                return None
-            if nxt.startswith("-"):
-                return None
-            return nxt
-    return None
+    return extract_arg_value(args, flags=flags, reject_flag_values=True)
 
 
 def _unique_destination_path(dest: Path) -> Path:
-    """Generate a non-colliding destination path by appending " (N)"."""
-    try:
-        if not dest.exists():
-            return dest
-    except Exception:
-        return dest
-
-    parent = dest.parent
-    stem = dest.stem
-    suffix = dest.suffix
-    for i in range(1, 10_000):
-        candidate = parent / f"{stem} ({i}){suffix}"
-        try:
-            if not candidate.exists():
-                return candidate
-        except Exception:
-            return candidate
-    return dest
+    return unique_path(dest)
 
 
 def _print_live_safe_stderr(message: str) -> None:

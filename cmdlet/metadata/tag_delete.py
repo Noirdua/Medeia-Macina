@@ -354,106 +354,11 @@ def _refresh_tag_view_if_current(
         pass
 
 
-def _parse_delete_tag_arguments(arguments: Sequence[str]) -> list[str]:
-    def _split_top_level_commas(text: str) -> list[str]:
-        segments: list[str] = []
-        current: list[str] = []
-        paren_depth = 0
-        angle_depth = 0
-        quote: str | None = None
-        escape = False
-
-        for ch in text:
-            if escape:
-                current.append(ch)
-                escape = False
-                continue
-            if ch == "\\":
-                current.append(ch)
-                escape = True
-                continue
-            if quote:
-                current.append(ch)
-                if ch == quote:
-                    quote = None
-                continue
-            if ch in {"'", '"'}:
-                current.append(ch)
-                quote = ch
-                continue
-            if ch == "(":
-                paren_depth += 1
-                current.append(ch)
-                continue
-            if ch == ")":
-                paren_depth = max(0, paren_depth - 1)
-                current.append(ch)
-                continue
-            if ch == "<":
-                angle_depth += 1
-                current.append(ch)
-                continue
-            if ch == ">":
-                angle_depth = max(0, angle_depth - 1)
-                current.append(ch)
-                continue
-            if ch == "," and paren_depth == 0 and angle_depth == 0:
-                segments.append("".join(current).strip())
-                current = []
-                continue
-            current.append(ch)
-
-        tail = "".join(current).strip()
-        if tail or segments:
-            segments.append(tail)
-        return segments
-
-    def _expand_pipe_namespace(text: str) -> list[str]:
-        parts = text.split("|")
-        expanded: list[str] = []
-        last_ns: str | None = None
-        for part in parts:
-            segment = part.strip()
-            if not segment:
-                continue
-            if ":" in segment:
-                ns, val = segment.split(":", 1)
-                ns = ns.strip()
-                val = val.strip()
-                last_ns = ns or last_ns
-                if last_ns is not None:
-                    expanded.append(f"{last_ns}:{val}")
-                elif ns or val:
-                    expanded.append(f"{ns}:{val}")
-            else:
-                if last_ns:
-                    expanded.append(f"{last_ns}:{segment}")
-                else:
-                    expanded.append(segment)
-        return expanded
-
-    tags: list[str] = []
-    for argument in arguments:
-        for token in _split_top_level_commas(str(argument)):
-            text = token.strip()
-            if not text:
-                continue
-            for entry in _expand_pipe_namespace(text):
-                candidate = entry.strip()
-                if not candidate:
-                    continue
-                if ":" in candidate:
-                    ns, val = candidate.split(":", 1)
-                    candidate = f"{ns.strip()}:{val.strip()}"
-                if candidate:
-                    tags.append(candidate)
-    return tags
-
 
 _DELETE_TAG_CMDLET = Cmdlet(
     name="tag",
-    summary="Remove tags from a file in a store.",
-    usage='metadata -delete -instance <store> [-query "hash:<sha256>"] <tag>[,<tag>...]',
+    summary="Remove tags from a file in an instance.",
+    usage='metadata -delete -instance <instance> [-query "hash:<sha256>"] <tag>[,<tag>...]',
     arg=[
         SharedArgs.QUERY,
         SharedArgs.INSTANCE,
@@ -531,7 +436,7 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
     # Normalize the incoming target list early so a non-hash -query can be treated
     # as the delete-tag payload when the file target already comes from the pipeline.
     items_to_process = sh.normalize_result_items(result)
-    tags_arg = _parse_delete_tag_arguments(rest)
+    tags_arg = parse_tag_arguments(rest)
 
     override_hash, query_valid = sh.require_single_hash_query(
         override_query,
@@ -541,7 +446,7 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
     if not query_valid:
         if (not tags_arg and override_query and items_to_process and not has_piped_tag
                 and not has_piped_tag_list):
-            tags_arg = _parse_delete_tag_arguments([override_query])
+            tags_arg = parse_tag_arguments([override_query])
             override_hash = None
         else:
             return 1

@@ -40,7 +40,7 @@ def _run(result: Any, args: List[str], config: Dict[str, Any]) -> int:
                 startup_table,
                 str(check.get("status") or "UNKNOWN"),
                 str(check.get("name") or "Plugin"),
-                provider=str(check.get("plugin") or ""),
+                plugin=str(check.get("plugin") or ""),
                 instance=str(check.get("instance") or ""),
                 files=check.get("files"),
                 detail=str(check.get("detail") or ""),

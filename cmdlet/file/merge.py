@@ -16,6 +16,7 @@ import shutil as _shutil
 import re as _re
 
 from SYS.config import resolve_output_dir
+from SYS.utils import sanitize_filename
 
 from .. import _shared as sh
 
@@ -325,7 +326,7 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
     if output_override:
         if output_override.is_dir():
             base_title = get_field(files_to_merge[0], "title", "merged")
-            base_name = _sanitize_name(str(base_title or "merged"))
+            base_name = sanitize_filename(str(base_title or "merged"), fallback="merged")
             output_path = output_override / f"{base_name} (merged).{_ext_for_format(output_format)}"
         else:
             output_path = output_override
@@ -463,17 +464,6 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
                 log(f"Warning: Could not delete {f.name}: {e}", file=sys.stderr)
 
     return 0
-
-
-def _sanitize_name(text: str) -> str:
-    """Sanitize filename."""
-    allowed = []
-    for ch in text:
-        allowed.append(ch if (ch.isalnum() or ch in {"-",
-                                                     "_",
-                                                     " ",
-                                                     "."}) else " ")
-    return (" ".join("".join(allowed).split()) or "merged").strip()
 
 
 def _ext_for_format(fmt: str) -> str:

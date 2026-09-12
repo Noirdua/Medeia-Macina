@@ -145,12 +145,23 @@ paths such as `provider.<plugin>.<instance>`.
 
 ---
 
+## Shared helpers
+Do not copy filename, path, config, or size helpers into a plugin. Import them:
+
+- `SYS.utils.sanitize_filename` — filesystem-safe names (Windows reserved names, illegal chars, length)
+- `SYS.utils.unique_path` — append ` (n)` when a file already exists
+- `SYS.utils.coerce_bool` / `coerce_int`
+- `SYS.utils.format_bytes` (`format_byte_size` is an alias)
+- `SYS.utils.sha256_file`, `ensure_directory`, `safe_output_dir`, `default_staging_dir`
+- `API.HTTP.HTTPClient` and `download_direct_file` for HTTP
+
 ## Best practices
 - Use `debug()` and `log()` appropriately; avoid noisy stderr output in normal runs.
 - Prefer returning `SearchResult` objects to provide consistent UX.
 - Keep `search()` tolerant of timeouts and malformed responses.
 - Use `full_metadata` to pass non-display data to `download()` and `selector()`.
 - Respect the `limit` parameter in `search()`.
+- Call the shared helpers above instead of local `_safe_filename` / `_unique_path` copies.
 
 ---
 

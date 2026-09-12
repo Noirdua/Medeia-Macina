@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import hashlib
 import inspect
 import json
 import os
@@ -235,24 +234,16 @@ class FileRelationshipTracker:
             king_hash: Hash of the primary file
             alt_paths: Paths to alternate versions (will be marked as 'alt')
         """
+        from SYS.utils import sha256_file
         self.register_king(primary_path, king_hash)
         for alt_path in alt_paths:
             try:
-                alt_hash = _get_file_hash(alt_path)
+                alt_hash = sha256_file(Path(alt_path))
                 self.add_alt(primary_path, alt_hash)
             except Exception as e:
                 import sys
 
                 print(f"Error hashing {alt_path}: {e}", file=sys.stderr)
-
-
-def _get_file_hash(filepath: str) -> str:
-    """Calculate SHA256 hash of a file."""
-    sha256_hash = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
 
 
 # ============= Download Module Classes =============
@@ -629,27 +620,6 @@ class ProgressBar:
             self._console = None
             self._progress = None
             self._task_id = None
-
-    def format_bytes(self, bytes_val: Optional[float]) -> str:
-        """Format bytes to human-readable size.
-
-        Args:
-            bytes_val: Number of bytes or None.
-
-        Returns:
-            Formatted string (e.g., "123.4 MB", "1.2 GB").
-        """
-        if bytes_val is None or bytes_val <= 0:
-            return "?.? B"
-
-        for unit in ("B", "KB", "MB", "GB", "TB"):
-            if bytes_val < 1024:
-                return f"{bytes_val:.1f} {unit}"
-            bytes_val /= 1024
-
-        return f"{bytes_val:.1f} PB"
-
-    # NOTE: rich.Progress handles the visual formatting; format_bytes remains as a general utility.
 
 
 class ProgressFileReader:

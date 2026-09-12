@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
-
-_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+from SYS.utils import normalize_sha256_hex
 
 
 def looks_like_url(value: Any, *, extra_prefixes: Iterable[str] = ()) -> bool:
@@ -30,9 +28,7 @@ def normalize_selection_args(selection_args: Any) -> Optional[List[str]]:
 
 def normalize_hash_for_selection(value: Any) -> str:
     text = str(value or "").strip()
-    if _SHA256_RE.fullmatch(text):
-        return text.lower()
-    return text
+    return normalize_sha256_hex(text) or text
 
 
 def build_hash_store_selection(

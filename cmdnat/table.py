@@ -10,6 +10,7 @@ from SYS.item_accessors import get_field
 from SYS.logger import log, status_panel
 from SYS.result_table import Column, Table
 from SYS.rich_display import stdout_console
+from SYS.utils import sanitize_filename
 
 
 _NUMERIC_NAMESPACE_HINTS = {
@@ -22,15 +23,6 @@ _NUMERIC_NAMESPACE_HINTS = {
     "volume",
     "part",
 }
-_WINDOWS_RESERVED_NAMES = {
-    "con",
-    "prn",
-    "aux",
-    "nul",
-    *(f"com{i}" for i in range(1, 10)),
-    *(f"lpt{i}" for i in range(1, 10)),
-}
-_ILLEGAL_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*]')
 _COUNT_FILTER_RE = re.compile(
     r"^@?([A-Za-z][A-Za-z0-9_. -]*?)\s*(<=|>=|!=|<>|==|=|<|>)\s*(\d+)\s*$"
 )
@@ -492,25 +484,6 @@ def _render_table(table: Any) -> int:
         return 1
 
 
-def _sanitize_filename_base(text: str) -> str:
-    s = str(text or "").strip()
-    if not s:
-        return "table"
-
-    s = _ILLEGAL_FILENAME_CHARS_RE.sub(" ", s)
-    s = "".join(ch for ch in s if ch.isprintable())
-    s = " ".join(s.split()).strip()
-    s = s.rstrip(" .")
-
-    if not s:
-        s = "table"
-    if s.lower() in _WINDOWS_RESERVED_NAMES:
-        s = f"_{s}"
-    if len(s) > 200:
-        s = s[:200].rstrip(" .")
-    return s or "table"
-
-
 def _resolve_output_path(path_arg: str, *, table_title: str) -> Path:
     raw = str(path_arg or "").strip()
     if not raw:
@@ -518,13 +491,14 @@ def _resolve_output_path(path_arg: str, *, table_title: str) -> Path:
 
     ends_with_sep = raw.endswith(("/", "\\"))
     target = Path(raw)
+    svg_name = f"{sanitize_filename(table_title, max_len=200, fallback='table')}.svg"
 
     if target.exists() and target.is_dir():
-        return target / f"{_sanitize_filename_base(table_title)}.svg"
+        return target / svg_name
 
     if (ends_with_sep or not target.suffix) and not target.exists():
         target.mkdir(parents=True, exist_ok=True)
-        return target / f"{_sanitize_filename_base(table_title)}.svg"
+        return target / svg_name
 
     if not target.suffix:
         target.parent.mkdir(parents=True, exist_ok=True)

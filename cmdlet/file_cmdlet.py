@@ -64,7 +64,7 @@ class File(Cmdlet):
             arg=[
                 CmdletArg("-search", type="flag", required=False, description="Search plugins or scrape a page"),
                 CmdletArg("-all", type="flag", required=False, description="With -search: list all files, not only those with .metadata"),
-                CmdletArg("-add", type="flag", required=False, description="Save a piped/remote file to -path, or ingest into a store/host"),
+                CmdletArg("-add", type="flag", required=False, description="Save a piped/remote file to -path, or ingest into a plugin instance"),
                 CmdletArg("-delete", type="flag", required=False, description="Delete from Hydrus or disk", alias="del"),
                 CmdletArg("-merge", type="flag", required=False, description="Merge files"),
                 CmdletArg("-download", type="flag", required=False, description="Fetch/scrape/export to disk (alias of file -add -path for piped rows)", alias="dl"),

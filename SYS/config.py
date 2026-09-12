@@ -694,27 +694,6 @@ def get_debrid_api_key(config: Dict[str, Any], service: str = "All-debrid") -> O
     return None
 
 
-def get_plugin_credentials(config: Dict[str, Any], provider: str) -> Optional[Dict[str, str]]:
-    """Get plugin credentials (email/password) from config.
-
-    Args:
-        config: Configuration dict
-        provider: Provider name (e.g., "openlibrary", "soulseek")
-
-    Returns:
-        Dict with credentials if found, None otherwise
-    """
-    _canonicalize_plugin_config(config)
-
-    plugin_config = config.get("plugin", {})
-    if isinstance(plugin_config, dict):
-        creds = plugin_config.get(provider.lower(), {})
-        if isinstance(creds, dict) and creds:
-            return creds
-
-    return None
-
-
 def resolve_cookies_path(
     config: Dict[str, Any], script_dir: Optional[Path] = None
 ) -> Optional[Path]:

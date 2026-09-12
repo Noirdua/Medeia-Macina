@@ -35,7 +35,7 @@ class Add_Note(Cmdlet):
             name="add-note",
             summary="Add file store note",
             usage=
-            'add-note (-query "title:<title>,text:<text>[,instance:<instance>][,hash:<sha256>]") [ -instance <store> | <piped> ]',
+            'add-note (-query "title:<title>,text:<text>[,instance:<instance>][,hash:<sha256>]") [ -instance <instance> | <piped> ]',
             alias=[""],
             arg=[
                 SharedArgs.INSTANCE,
@@ -59,7 +59,7 @@ class Add_Note(Cmdlet):
         )
         # Populate dynamic store choices for autocomplete
         try:
-            SharedArgs.INSTANCE.choices = SharedArgs.get_store_choices(None)
+            SharedArgs.INSTANCE.choices = SharedArgs.get_instance_choices(None)
         except Exception:
             pass
         self.register()
@@ -104,7 +104,7 @@ class Add_Note(Cmdlet):
             return None, None
 
         try:
-            from SYS.cli_syntax import parse_query, get_field
+            from SYS.cli_syntax import parse_query, get_query_field as get_field
         except Exception:
             parse_query = None  # type: ignore
             get_field = None  # type: ignore
@@ -188,7 +188,7 @@ class Add_Note(Cmdlet):
 
         if hash_override and not store_override:
             log(
-                "[add_note] Error: hash:<sha256> requires instance:<instance> in -query or -instance <store>",
+                "[add_note] Error: hash:<sha256> requires instance:<instance> in -query or -instance <instance>",
                 file=sys.stderr,
             )
             return 1

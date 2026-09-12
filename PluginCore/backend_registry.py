@@ -8,15 +8,12 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import inspect
-import re
 from typing import Any, Dict, Optional, Type
 
 from SYS.logger import debug
-from SYS.utils import expand_path
+from SYS.utils import expand_path, is_sha256_hex
 
 from PluginCore.backend_base import BackendBase
-
-_SHA256_HEX_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 _PLUGIN_DISCOVERED_CLASSES_CACHE: Dict[str, Optional[Type[BackendBase]]] = {}
 
@@ -367,7 +364,7 @@ class BackendRegistry:
             if not store_name or not file_hash:
                 return False
 
-            if not _SHA256_HEX_RE.fullmatch(file_hash):
+            if not is_sha256_hex(file_hash):
                 return False
 
             backend = self[store_name]

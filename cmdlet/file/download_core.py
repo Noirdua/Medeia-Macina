@@ -34,7 +34,7 @@ from SYS.selection_builder import (
     extract_urls_from_selection_args,
     selection_args_have_url,
 )
-from SYS.utils import sha256_file
+from SYS.utils import sanitize_filename, sha256_file, unique_path
 
 from PluginCore.registry import plugin_attr
 
@@ -47,8 +47,6 @@ CmdletArg = sh.CmdletArg
 SharedArgs = sh.SharedArgs
 QueryArg = sh.QueryArg
 parse_cmdlet_args = sh.parse_cmdlet_args
-register_url_with_local_library = sh.register_url_with_local_library
-coerce_to_pipe_object = sh.coerce_to_pipe_object
 get_field = sh.get_field
 resolve_target_dir = sh.resolve_target_dir
 coerce_to_path = sh.coerce_to_path
@@ -64,7 +62,7 @@ class Download_File(Cmdlet):
             name="download-file",
             summary="Fetch a URL or export a store file to disk (does not import into Hydrus).",
             usage=
-            "download-file <url|path> [-plugin NAME] [-instance NAME] [-path DIR] [options] OR @N | download-file [-plugin NAME] [-instance NAME] [-path DIR] [options] OR download-file -query \"hash:<sha256>\" -instance <store> [-browser]",
+            "download-file <url|path> [-plugin NAME] [-instance NAME] [-path DIR] [options] OR @N | download-file [-plugin NAME] [-instance NAME] [-path DIR] [options] OR download-file -query \"hash:<sha256>\" -instance <instance> [-browser]",
             alias=["dl-file",
                    "download-http"],
             arg=[
@@ -119,7 +117,7 @@ class Download_File(Cmdlet):
             ],
             detail=[
                 "Download files directly via HTTP or streaming media via yt-dlp.",
-                "Also exports store-backed files via hash+store selection or -query \"hash:<sha256>\" -instance <store>.",
+                "Also exports instance-backed files via hash+instance selection or -query \"hash:<sha256>\" -instance <instance>.",
                 "Use -plugin with -instance to target a named plugin config when a plugin exposes multiple instances.",
                 "For Internet Archive item pages (archive.org/details/...), shows a selectable file/format list; pick with @N to download.",
                 "For ordinary webpages, scrapes downloadable file types (images, PDFs, etc.) and lists them for selection.",
@@ -208,7 +206,7 @@ class Download_File(Cmdlet):
             return []
         return [str(value).strip().lower() for value in values if str(value or "").strip()]
 
-    def _normalize_provider_key(self, value: Optional[Any]) -> Optional[str]:
+    def _normalize_plugin_key(self, value: Optional[Any]) -> Optional[str]:
         if value is None:
             return None
         try:
@@ -221,16 +219,16 @@ class Download_File(Cmdlet):
             normalized = normalized.split(".", 1)[0]
         return normalized.lower()
 
-    def _provider_key_from_item(self, item: Any) -> Optional[str]:
+    def _plugin_key_from_item(self, item: Any) -> Optional[str]:
         table_hint = get_field(item, "table")
-        key = self._normalize_provider_key(table_hint)
+        key = self._normalize_plugin_key(table_hint)
         if key:
             return key
-        provider_hint = get_field(item, "plugin")
-        key = self._normalize_provider_key(provider_hint)
+        plugin_hint = get_field(item, "plugin")
+        key = self._normalize_plugin_key(plugin_hint)
         if key:
             return key
-        return self._normalize_provider_key(get_field(item, "source"))
+        return self._normalize_plugin_key(get_field(item, "source"))
 
     @staticmethod
     def _path_looks_local(value: Any) -> bool:
@@ -261,28 +259,11 @@ class Download_File(Cmdlet):
 
     @staticmethod
     def _sanitize_export_filename(name: str) -> str:
-        allowed_chars: List[str] = []
-        for ch in str(name or ""):
-            if ch.isalnum() or ch in {"-", "_", " ", "."}:
-                allowed_chars.append(ch)
-            else:
-                allowed_chars.append(" ")
-        sanitized = " ".join("".join(allowed_chars).split())
-        return sanitized or "export"
+        return sanitize_filename(name, fallback="export")
 
     @staticmethod
     def _unique_export_path(path: Path) -> Path:
-        if not path.exists():
-            return path
-        stem = path.stem
-        suffix = path.suffix
-        parent = path.parent
-        counter = 1
-        while True:
-            candidate = parent / f"{stem} ({counter}){suffix}"
-            if not candidate.exists():
-                return candidate
-            counter += 1
+        return unique_path(path)
 
     @staticmethod
     def _load_provider_registry() -> Dict[str, Any]:

@@ -63,7 +63,7 @@ from SYS.rich_display import (
 from cmdnat._status_shared import (
     add_startup_check as _shared_add_startup_check,
     collect_plugin_startup_checks as _collect_plugin_startup_checks,
-    has_provider as _has_provider,
+    has_plugin as _has_plugin,
 )
 
 
@@ -1236,7 +1236,7 @@ class CLI:
         try:
             from SYS.cmdlet_spec import SharedArgs
             config = self._config_loader.load()
-            SharedArgs._refresh_store_choices_cache(config)
+            SharedArgs._refresh_instance_choices_cache(config)
         except Exception:
             pass
 
@@ -1246,11 +1246,6 @@ class CLI:
     @staticmethod
     def parse_selection_syntax(token: str) -> Optional[List[int]]:
         return SelectionSyntax.parse(token)
-
-    @classmethod
-    def get_store_choices(cls) -> List[str]:
-        loader = ConfigLoader(root=cls.ROOT)
-        return CmdletIntrospection.store_choices(loader.load())
 
     def build_app(self) -> typer.Typer:
         app = typer.Typer(help="Medeia-Macina CLI")
@@ -1461,7 +1456,7 @@ class CLI:
             status: str,
             name: str,
             *,
-            provider: str = "",
+            plugin: str = "",
             instance: str = "",
             files: int | str | None = None,
             detail: str = "",
@@ -1470,7 +1465,7 @@ class CLI:
                 startup_table,
                 status,
                 name,
-                provider=provider,
+                plugin=plugin,
                 instance=instance,
                 files=files,
                 detail=detail,
@@ -1489,14 +1484,14 @@ class CLI:
                 _add_startup_check(
                     str(check.get("status") or "UNKNOWN"),
                     str(check.get("name") or "Plugin"),
-                    provider=str(check.get("plugin") or ""),
+                    plugin=str(check.get("plugin") or ""),
                     instance=str(check.get("instance") or ""),
                     detail=str(check.get("detail") or ""),
                     files=check.get("files"),
                 )
 
             # Plugin support checks (configured via [plugin=...])
-            if _has_provider(config, "florencevision") and plugin_attr("florencevision", "FlorenceVisionTool") is not None:
+            if _has_plugin(config, "florencevision") and plugin_attr("florencevision", "FlorenceVisionTool") is not None:
                 try:
                     plugin_cfg = config.get("plugin")
                     fv_cfg = plugin_cfg.get("florencevision") if isinstance(plugin_cfg, dict) else None
@@ -1505,7 +1500,7 @@ class CLI:
                         _add_startup_check(
                             "DISABLED",
                             "FlorenceVision",
-                            provider="plugin",
+                            plugin="plugin",
                             detail="Not enabled",
                         )
                     else:
@@ -1516,21 +1511,21 @@ class CLI:
                             _add_startup_check(
                                 "DISABLED",
                                 "FlorenceVision",
-                                provider="plugin",
+                                plugin="plugin",
                                 detail="Missing: " + ", ".join(missing),
                             )
                         else:
                             _add_startup_check(
                                 "ENABLED",
                                 "FlorenceVision",
-                                provider="plugin",
+                                plugin="plugin",
                                 detail="Ready",
                             )
                 except Exception as exc:
                     _add_startup_check(
                         "DISABLED",
                         "FlorenceVision",
-                        provider="plugin",
+                        plugin="plugin",
                         detail=str(exc),
                     )
         except Exception as exc:

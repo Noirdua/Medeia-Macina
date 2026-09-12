@@ -33,11 +33,9 @@ def _ids(result: Any, args: Sequence[str]) -> List[str]:
 
 
 def _plugin_filter(args: Sequence[str]) -> str:
-    tokens = [str(t or "").strip() for t in (args or [])]
-    for idx, tok in enumerate(tokens):
-        if tok.lower() in {"-plugin", "--plugin"} and idx + 1 < len(tokens):
-            return tokens[idx + 1]
-    return ""
+    from SYS.command_parsing import extract_arg_value
+
+    return extract_arg_value(args, flags=("-plugin", "--plugin")) or ""
 
 
 def _publish(plugin: str = "") -> int:

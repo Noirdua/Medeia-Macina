@@ -26,8 +26,8 @@ class Get_Note(Cmdlet):
     def __init__(self) -> None:
         super().__init__(
             name="get-note",
-            summary="List notes on a file in a store.",
-            usage='get-note -instance <store> [-query "hash:<sha256>"]',
+            summary="List notes on a file in an instance.",
+            usage='get-note -instance <instance> [-query "hash:<sha256>"]',
             alias=["get-notes",
                    "get_note"],
             arg=[
@@ -41,7 +41,7 @@ class Get_Note(Cmdlet):
             exec=self.run,
         )
         try:
-            SharedArgs.INSTANCE.choices = SharedArgs.get_store_choices(None)
+            SharedArgs.INSTANCE.choices = SharedArgs.get_instance_choices(None)
         except Exception:
             pass
         self.register()

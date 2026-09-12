@@ -31,8 +31,6 @@ extract_duration = sh.extract_duration
 coerce_to_pipe_object = sh.coerce_to_pipe_object
 collapse_namespace_tags = sh.collapse_namespace_tags
 resolve_target_dir = sh.resolve_target_dir
-resolve_media_kind_by_extension = sh.resolve_media_kind_by_extension
-coerce_to_path = sh.coerce_to_path
 build_pipeline_preview = sh.build_pipeline_preview
 get_field = sh.get_field
 
@@ -137,7 +135,7 @@ class Add_File(Cmdlet):
         self.register()
 
     @staticmethod
-    def _normalize_provider_key(value: Optional[Any]) -> Optional[str]:
+    def _normalize_plugin_key(value: Optional[Any]) -> Optional[str]:
         if value is None:
             return None
         try:
@@ -152,7 +150,7 @@ class Add_File(Cmdlet):
 
     @staticmethod
     def _wants_disk_fetch(parsed: Dict[str, Any], result: Any) -> bool:
-        plugin = Add_File._normalize_provider_key(parsed.get("plugin"))
+        plugin = Add_File._normalize_plugin_key(parsed.get("plugin"))
         if plugin and plugin != "local":
             return False
         if plugin == "local":
@@ -187,7 +185,7 @@ class Add_File(Cmdlet):
         plugin_name = parsed.get("plugin")
         source_arg = path_arg
         folder_name = parsed.get("folder")
-        plugin_key = Add_File._normalize_provider_key(plugin_name)
+        plugin_key = Add_File._normalize_plugin_key(plugin_name)
         if path_arg and plugin_key == "local":
             try:
                 path_obj = Path(str(path_arg))
@@ -325,7 +323,7 @@ class Add_File(Cmdlet):
                 )
                 return 1
 
-        normalized_plugin_name = Add_File._normalize_provider_key(plugin_name)
+        normalized_plugin_name = Add_File._normalize_plugin_key(plugin_name)
         if normalized_plugin_name == "local":
             resolved_local_instance, resolved_local_path = Add_File._resolve_local_export_plugin_target(
                 plugin_instance or location,
@@ -817,7 +815,7 @@ class Add_File(Cmdlet):
                 "Use -plugin local -instance <name|path> for local export or configure that store backend."
             )
 
-        normalized_plugin_name = Add_File._normalize_provider_key(plugin_name)
+        normalized_plugin_name = Add_File._normalize_plugin_key(plugin_name)
         if normalized_plugin_name:
             upload_plugin = deps.get_plugin_for_cmdlet(normalized_plugin_name, "add-file")
             if upload_plugin is None:
@@ -859,7 +857,7 @@ class Add_File(Cmdlet):
         store_instance: Optional[Any] = None,
         deps: Optional[_CommandDependencies] = None,
     ) -> Optional[str]:
-        plugin_key = Add_File._normalize_provider_key(plugin_name)
+        plugin_key = Add_File._normalize_plugin_key(plugin_name)
         if not plugin_key:
             return None
 
@@ -1032,7 +1030,7 @@ from .add_validation import (  # noqa: E402
     _resolve_backend_by_name,
     _download_piped_source,
     _maybe_download_plugin_result,
-    _build_provider_filename,
+    _build_plugin_filename,
     _maybe_download_backend_file,
     _download_remote_backend_url,
 )
@@ -1080,7 +1078,7 @@ Add_File._is_probable_url = staticmethod(_is_probable_url)
 Add_File._resolve_backend_by_name = staticmethod(_resolve_backend_by_name)
 Add_File._download_piped_source = staticmethod(_download_piped_source)
 Add_File._maybe_download_plugin_result = staticmethod(_maybe_download_plugin_result)
-Add_File._build_provider_filename = staticmethod(_build_provider_filename)
+Add_File._build_plugin_filename = staticmethod(_build_plugin_filename)
 Add_File._maybe_download_backend_file = staticmethod(_maybe_download_backend_file)
 Add_File._download_remote_backend_url = staticmethod(_download_remote_backend_url)
 

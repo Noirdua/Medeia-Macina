@@ -486,12 +486,12 @@ def _fetch_lyrics(artist: str, track: str, album: str = "") -> str:
     if not artist or not track:
         return ""
     try:
-        import httpx
+        from API.HTTP import HTTPClient
 
         params: Dict[str, Any] = {"artist_name": artist, "track_name": track}
         if album:
             params["album_name"] = str(album).strip()
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        with HTTPClient(timeout=12.0) as client:
             response = client.get("https://lrclib.net/api/get", params=params)
             data: Any = None
             if response.status_code == 200:
@@ -911,14 +911,14 @@ def _llm_extra_tags(
         f"Tags: {', '.join(existing)}\n"
     )
     try:
-        import httpx
+        from API.HTTP import HTTPClient
 
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
         }
-        with httpx.Client(timeout=20.0) as client:
+        with HTTPClient(timeout=20.0) as client:
             response = client.post(url, json=payload)
             response.raise_for_status()
             data = response.json()

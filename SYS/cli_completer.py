@@ -47,13 +47,14 @@ class CmdletIntrospection:
             return []
 
     @staticmethod
-    def store_choices(config: Dict[str, Any], force: bool = False) -> List[str]:
+    def instance_choices(config: Dict[str, Any], force: bool = False) -> List[str]:
         try:
-            # Use the cached startup check from SharedArgs
             from SYS.cmdlet_spec import SharedArgs
-            return SharedArgs.get_store_choices(config, force=force)
+            return SharedArgs.get_instance_choices(config, force=force)
         except Exception:
             return []
+
+    store_choices = instance_choices
 
     @classmethod
     def arg_choices(cls,
@@ -66,7 +67,7 @@ class CmdletIntrospection:
         try:
             normalized_arg = (arg_name or "").lstrip("-").strip().lower()
 
-            if normalized_arg in ("storage", "store"):
+            if normalized_arg in ("storage", "store", "instance"):
                 # Use cached/lightweight names for completions to avoid instantiating backends
                 # (instantiating backends may perform heavy initialization).
                 backends = cls.store_choices(config, force=False)

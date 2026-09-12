@@ -28,27 +28,7 @@ __all__ = [
     "merge_urls",
     "remove_urls",
     "set_item_urls",
-    "register_url_with_local_library",
 ]
-
-
-def register_url_with_local_library(
-    pipe_obj: Any,
-    config: Dict[str, Any],
-) -> bool:
-    """Register url with a file in the local library database.
-
-    This is called automatically by download cmdlet to ensure url are persisted
-    without requiring a separate add-url step in the pipeline.
-
-    Args:
-        pipe_obj: PipeObject with path and url
-        config: Config dict containing local library path
-
-    Returns:
-        True if url were registered, False otherwise
-    """
-    return False
 
 
 def merge_urls(existing: Any, incoming: Sequence[Any]) -> list[str]:

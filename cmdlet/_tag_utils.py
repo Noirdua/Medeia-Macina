@@ -20,10 +20,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from SYS import models
 from SYS.logger import log
+from SYS.utils import is_sha256_hex, normalize_sha256_hex
 from ._pipeobject_utils import merge_sequences
 
 __all__ = [
     "set_tag_groups_path",
+    "_normalize_hash_cached",
     "normalize_hash",
     "looks_like_hash",
     "parse_tag_arguments",
@@ -327,43 +329,19 @@ def set_tag_groups_path(path: Path) -> None:
 
 @lru_cache(maxsize=4096)
 def _normalize_hash_cached(hash_hex: str) -> Optional[str]:
-    text = hash_hex.strip().lower()
-    if not text:
-        return None
-    if len(text) != 64:
-        return None
-    if not all(ch in "0123456789abcdef" for ch in text):
-        return None
-    return text
+    return normalize_sha256_hex(hash_hex)
 
 
 def normalize_hash(hash_hex: Optional[str]) -> Optional[str]:
-    """Normalize a hash string to lowercase, or return None if invalid.
-
-    Args:
-            hash_hex: String that should be a hex hash
-
-    Returns:
-            Lowercase hash string, or None if input is not a string or is empty
-    """
     if not isinstance(hash_hex, str):
         return None
     return _normalize_hash_cached(hash_hex)
 
 
 def looks_like_hash(candidate: Optional[str]) -> bool:
-    """Check if a string looks like a SHA256 hash (64 hex chars).
-
-    Args:
-            candidate: String to test
-
-    Returns:
-            True if the string is 64 lowercase hex characters
-    """
     if not isinstance(candidate, str):
         return False
-    text = candidate.strip().lower()
-    return len(text) == 64 and all(ch in "0123456789abcdef" for ch in text)
+    return is_sha256_hex(candidate)
 
 
 def _normalize_tag_value_template_name(value: Any) -> str:

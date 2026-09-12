@@ -775,7 +775,7 @@ class Add_Tag(Cmdlet):
     def __init__(self, *, register_cmdlet: bool = True) -> None:
         super().__init__(
             name="tag",
-            summary="Add tag to a file in a store.",
+            summary="Add tag to a file in an instance.",
             usage=
             'metadata -add [-query "hash:<sha256> instance:<store>"] [-extract "(field) ..."] [-duplicate <format>] [-list <list>[,<list>...]] [--all] <tag>[,<tag>...]',
             arg=[

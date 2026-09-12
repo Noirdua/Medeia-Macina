@@ -17,7 +17,6 @@ Cmdlet = sh.Cmdlet
 CmdletArg = sh.CmdletArg
 SharedArgs = sh.SharedArgs
 normalize_hash = sh.normalize_hash
-fmt_bytes = sh.fmt_bytes
 get_hash_for_operation = sh.get_hash_for_operation
 should_show_help = sh.should_show_help
 get_field = sh.get_field

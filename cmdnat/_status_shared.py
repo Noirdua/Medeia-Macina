@@ -15,7 +15,7 @@ def add_startup_check(
     status: str,
     name: str,
     *,
-    provider: str = "",
+    plugin: str = "",
     instance: str = "",
     files: int | str | None = None,
     detail: str = "",
@@ -23,18 +23,18 @@ def add_startup_check(
     row = table.add_row()
     row.add_column("STATUS", upper_text(status))
     row.add_column("NAME", upper_text(name))
-    row.add_column("PLUGIN", upper_text(provider or ""))
+    row.add_column("PLUGIN", upper_text(plugin or ""))
     row.add_column("INSTANCE", upper_text(instance or ""))
     row.add_column("FILES", "" if files is None else str(files))
     row.add_column("DETAIL", upper_text(detail or ""))
 
 
-def _provider_config_map(config: dict) -> dict[str, Any]:
+def _plugin_config_map(config: dict) -> dict[str, Any]:
     if not isinstance(config, dict):
         return {}
 
-    provider_cfg = config.get("plugin")
-    return provider_cfg if isinstance(provider_cfg, dict) else {}
+    plugin_cfg = config.get("plugin")
+    return plugin_cfg if isinstance(plugin_cfg, dict) else {}
 
 
 def _iter_registered_plugin_infos() -> tuple[Any, ...]:
@@ -98,12 +98,15 @@ def _resolve_startup_instance_text(
     return ", ".join(_extract_configured_instance_names(configured_entry))
 
 
-def has_provider(cfg: dict, name: str) -> bool:
-    provider_cfg = cfg.get("plugin")
-    if not isinstance(provider_cfg, dict):
+def has_plugin(cfg: dict, name: str) -> bool:
+    plugin_cfg = cfg.get("plugin")
+    if not isinstance(plugin_cfg, dict):
         return False
-    block = provider_cfg.get(str(name).strip().lower())
+    block = plugin_cfg.get(str(name).strip().lower())
     return isinstance(block, dict) and bool(block)
+
+
+has_provider = has_plugin
 
 
 def ping_url(url: str, timeout: float = 3.0) -> tuple[bool, str]:
@@ -122,12 +125,10 @@ def ping_url(url: str, timeout: float = 3.0) -> tuple[bool, str]:
         return False, f"{url} ({type(exc).__name__})"
 
 
-def provider_display_name(key: str) -> str:
+def plugin_display_name(key: str) -> str:
     label = (key or "").strip().lower()
     if not label:
         return "Plugin"
-
-    # Preserve expected brand casing for common providers.
     display_overrides = {
         "youtube": "YouTube",
         "archive.org": "Archive.org",
@@ -140,8 +141,7 @@ def provider_display_name(key: str) -> str:
     return label[:1].upper() + label[1:]
 
 
-def default_provider_ping_targets(key: str) -> list[str]:
-    """Return default health-check URLs for known providers."""
+def default_plugin_ping_targets(key: str) -> list[str]:
     label = (key or "").strip().lower()
     defaults = {
         "bandcamp": ["https://bandcamp.com"],
@@ -166,7 +166,7 @@ def ping_first(urls: list[str]) -> tuple[bool, str]:
 
 
 def collect_plugin_startup_checks(config: dict) -> list[dict[str, Any]]:
-    provider_cfg = _provider_config_map(config)
+    plugin_cfg = _plugin_config_map(config)
 
     checks: list[dict[str, Any]] = []
     seen_plugin_keys: set[str] = set()
@@ -179,7 +179,7 @@ def collect_plugin_startup_checks(config: dict) -> list[dict[str, Any]]:
 
         plugin = None
         summary: dict[str, Any]
-        display_name = provider_display_name(plugin_key)
+        display_name = plugin_display_name(plugin_key)
         configured_entry: Any = None
 
         try:
@@ -213,7 +213,7 @@ def collect_plugin_startup_checks(config: dict) -> list[dict[str, Any]]:
                 "instance": _resolve_startup_instance_text(
                     plugin,
                     summary,
-                    configured_entry if configured_entry else provider_cfg.get(plugin_key),
+                    configured_entry if configured_entry else plugin_cfg.get(plugin_key),
                 ),
                 "detail": detail,
                 "files": summary.get("files"),
@@ -221,3 +221,7 @@ def collect_plugin_startup_checks(config: dict) -> list[dict[str, Any]]:
         )
 
     return checks
+
+
+provider_display_name = plugin_display_name
+default_provider_ping_targets = default_plugin_ping_targets

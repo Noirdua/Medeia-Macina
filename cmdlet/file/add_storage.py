@@ -426,7 +426,7 @@ def _handle_plugin_upload(
             "instance": instance_name,
         }
         pipeline_progress = PipelineProgress(ctx)
-        normalized_plugin_name = Add_File._normalize_provider_key(plugin_name)
+        normalized_plugin_name = Add_File._normalize_plugin_key(plugin_name)
         f_hash = Add_File._resolve_file_hash(None, media_path, pipe_obj, None)
         result = None
         tags, urls, title, f_hash = Add_File._prepare_metadata(result, media_path, pipe_obj, config)

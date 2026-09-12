@@ -23,7 +23,7 @@ from .add_validation import (
     _resolve_backend_by_name,
     _download_piped_source,
     _maybe_download_plugin_result,
-    _build_provider_filename,
+    _build_plugin_filename,
     _maybe_download_backend_file,
     _download_remote_backend_url,
 )

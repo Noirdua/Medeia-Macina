@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from PluginCore.registry import get_plugin
+from SYS.utils import sanitize_filename, unique_preserve_order, value_normalize
 from SYS.yt_metadata import extract_ytdlp_tags
 
 try:  # Optional; used when available for richer metadata fetches
@@ -30,11 +31,6 @@ try:
     import musicbrainzngs
 except ImportError:
     musicbrainzngs = None
-
-
-def value_normalize(value: Any) -> str:
-    text = str(value).strip()
-    return text.lower() if text else ""
 
 
 def _append_unique(target: List[str], seen: Set[str], value: Any) -> None:
@@ -112,16 +108,6 @@ def sanitize_metadata_value(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         value = ", ".join(str(v) for v in value if v)
     return str(value).strip().replace("\n", " ").replace("\r", " ")
-
-
-def unique_preserve_order(items: Iterable[Any]) -> list[Any]:
-    seen = set()
-    result = []
-    for item in items:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
 
 
 def fetch_musicbrainz_tags(mbid: str, entity: str = "release") -> Dict[str, Any]:
@@ -728,25 +714,8 @@ def extract_title(tags: Iterable[str]) -> Optional[str]:
 
 
 def _sanitize_title_for_filename(title: str) -> str:
-    # Allow alnum, hyphen, underscore, and space; replace other chars with space
-    temp = []
-    for ch in title:
-        if ch.isalnum() or ch in {"-",
-                                  "_",
-                                  " "}:
-            temp.append(ch)
-        else:
-            temp.append(" ")
-    # Collapse whitespace and trim hyphens/underscores around words
-    rough = "".join(temp)
-    tokens = []
-    for seg in rough.split():
-        cleaned = seg.strip("-_ ")
-        if cleaned:
-            tokens.append(cleaned)
-    sanitized = "_".join(tokens)
-    sanitized = sanitized.strip("-_")
-    return sanitized or "untitled"
+    cleaned = sanitize_filename(title, fallback="untitled").replace(" ", "_").strip("_")
+    return cleaned or "untitled"
 
 
 def apply_title_to_path(media_path: Path, tags: Iterable[str]) -> Path:
@@ -2268,20 +2237,7 @@ def format_playlist_entry(entry: Dict[str,
 
 
 def extract_title_from_tags(tags_list: List[str]) -> Optional[str]:
-    """Extract title from tags list."""
-    try:
-        extracted = extract_title(tags_list)
-        if extracted:
-            return extracted
-    except Exception:
-        logger.exception("extract_title failed while extracting title from tags")
-
-    for t in tags_list:
-        if isinstance(t, str) and t.lower().startswith("title:"):
-            val = t.split(":", 1)[1].strip()
-            if val:
-                return val
-    return None
+    return extract_title(tags_list)
 
 
 def summarize_tags(tags_list: List[str], limit: int = 8) -> str:

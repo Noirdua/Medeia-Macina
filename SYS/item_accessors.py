@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Iterable, Optional
 
-_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+from SYS.utils import normalize_sha256_hex
 
 
 def get_field(obj: Any, field: str, default: Optional[Any] = None) -> Any:
@@ -114,10 +113,7 @@ def set_field(obj: Any, field: str, value: Any) -> bool:
 
 
 def get_sha256_hex(obj: Any, *fields: str) -> Optional[str]:
-    value = get_text_field(obj, *(fields or ("hash",)))
-    if value and _SHA256_RE.fullmatch(value):
-        return value.lower()
-    return None
+    return normalize_sha256_hex(get_text_field(obj, *(fields or ("hash",))))
 
 
 def get_store_name(obj: Any, *fields: str) -> Optional[str]:

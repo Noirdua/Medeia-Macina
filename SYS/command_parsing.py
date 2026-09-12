@@ -22,6 +22,7 @@ def extract_arg_value(
     *,
     flags: Iterable[str],
     allow_positional: bool = False,
+    reject_flag_values: bool = False,
 ) -> Optional[str]:
     if not args:
         return None
@@ -41,10 +42,12 @@ def extract_arg_value(
         if low in normalized_flags and idx + 1 < len(tokens):
             candidate = str(tokens[idx + 1]).strip()
             if candidate:
+                if reject_flag_values and candidate.startswith("-"):
+                    continue
                 return candidate
-        if "=" in low:
-            head, value = low.split("=", 1)
-            if head in normalized_flags and value:
+        if "=" in text:
+            head, value = text.split("=", 1)
+            if head.strip().lower() in normalized_flags and value.strip():
                 return value.strip()
 
     if not allow_positional:

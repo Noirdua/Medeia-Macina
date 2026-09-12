@@ -44,6 +44,8 @@ from .. import _shared as sh
 
 normalize_hash = sh.normalize_hash
 looks_like_hash = sh.looks_like_hash
+get_field = sh.get_field
+merge_sequences = sh.merge_sequences
 Cmdlet = sh.Cmdlet
 CmdletArg = sh.CmdletArg
 SharedArgs = sh.SharedArgs
@@ -51,21 +53,7 @@ parse_cmdlet_args = sh.parse_cmdlet_args
 
 
 def _dedup_tags_preserve_order(tags: List[str]) -> List[str]:
-    """Deduplicate tags case-insensitively while preserving order."""
-    out: List[str] = []
-    seen: set[str] = set()
-    for t in tags or []:
-        if not isinstance(t, str):
-            continue
-        s = t.strip()
-        if not s:
-            continue
-        key = s.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(s)
-    return out
+    return merge_sequences(tags, case_sensitive=False)
 
 
 # Tag item for ResultTable display and piping
@@ -360,13 +348,6 @@ def _run_impl(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
                 debug(
                     f"[get_tag] Failed to resolve numeric selection arg {token}: {exc}"
                 )
-
-    # Helper to get field from both dict and object
-    def get_field(obj: Any, field: str, default: Any = None) -> Any:
-        if isinstance(obj, dict):
-            return obj.get(field, default)
-        else:
-            return getattr(obj, field, default)
 
     # Parse arguments using shared parser
     parsed_args = parse_cmdlet_args(args_list, Get_Tag(register_cmdlet=False))

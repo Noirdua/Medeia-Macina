@@ -18,8 +18,6 @@ from .. import _shared as sh
 from .download_core import Download_File
 
 coerce_to_path = sh.coerce_to_path
-coerce_to_pipe_object = sh.coerce_to_pipe_object
-register_url_with_local_library = sh.register_url_with_local_library
 get_field = sh.get_field
 
 
@@ -34,12 +32,6 @@ def _emit_plugin_items(
         if not isinstance(item, dict):
             continue
         pipeline_context.emit(item)
-        if item.get("url"):
-            try:
-                pipe_obj = coerce_to_pipe_object(item)
-                register_url_with_local_library(pipe_obj, config)
-            except Exception:
-                pass
         emitted += 1
         try:
             self._record_download_item(item)
@@ -169,7 +161,7 @@ def _expand_provider_items(
 
     for item in piped_items:
         try:
-            provider_key = self._provider_key_from_item(item)
+            provider_key = self._plugin_key_from_item(item)
             provider = get_provider(provider_key, config) if provider_key and get_provider else None
 
             if provider and hasattr(provider, "expand_item") and callable(provider.expand_item):
@@ -250,7 +242,7 @@ def _download_provider_items(
             path_from_result=coerce_to_path,
         )
     except Exception as exc:
-        log(f"Provider {provider_name} download_items error: {exc}", file=sys.stderr)
+        log(f"Plugin {provider_name} download_items error: {exc}", file=sys.stderr)
         return 0
 
     try:
@@ -505,7 +497,7 @@ def _process_explicit_urls(
                                 continue
 
                 except Exception as e:
-                    log(f"Provider {provider_name} error handling {url}: {e}", file=sys.stderr)
+                    log(f"Plugin {provider_name} error handling {url}: {e}", file=sys.stderr)
                     pass
 
                 if not handled:
@@ -630,7 +622,7 @@ def _process_provider_items(self,
                     full_metadata=full_metadata if isinstance(full_metadata, dict) else None,
                     progress=progress,
                     config=config,
-                    provider_hint=self._provider_key_from_item(item),
+                    provider_hint=self._plugin_key_from_item(item),
                 )
                 downloaded_count += 1
                 processed_items += 1
@@ -639,7 +631,7 @@ def _process_provider_items(self,
             attempted_provider_download = False
             provider_sr = None
             provider_obj = None
-            provider_key = self._provider_key_from_item(item)
+            provider_key = self._plugin_key_from_item(item)
             if provider_key and get_provider and SearchResult:
                 provider_obj = get_provider(provider_key, config)
 

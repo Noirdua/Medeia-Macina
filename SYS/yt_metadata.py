@@ -1,10 +1,7 @@
 import re
 from typing import Any, Dict, List, Optional, Set
 
-
-def value_normalize(value: Any) -> str:
-    text = str(value).strip()
-    return text.lower() if text else ""
+from SYS.utils import value_normalize
 
 
 def _add_tag(tags: List[str], namespace: str, value: str) -> None:

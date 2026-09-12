@@ -9,6 +9,7 @@ import re
 
 from SYS import models
 from SYS.logger import log, debug
+from SYS.utils import normalize_sha256_hex
 
 from .. import _shared as sh
 
@@ -125,12 +126,7 @@ def _maybe_apply_florencevision_tags(
 
 
 def _normalize_hash_candidate(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    if len(text) != 64:
-        return ""
-    if any(ch not in "0123456789abcdef" for ch in text):
-        return ""
-    return text
+    return normalize_sha256_hex(value) or ""
 
 
 def _parse_relationship_tag_king_alts(

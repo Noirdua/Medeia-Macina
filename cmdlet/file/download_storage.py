@@ -27,7 +27,6 @@ from .download_core import Download_File
 
 get_field = sh.get_field
 resolve_target_dir = sh.resolve_target_dir
-coerce_to_path = sh.coerce_to_path
 
 
 @staticmethod

@@ -124,14 +124,6 @@ def collect_registered_cmdlet_names(
 class SharedArgs:
     """Registry of shared CmdletArg definitions used across multiple cmdlet."""
 
-    STORE = CmdletArg(
-        name="store",
-        type="enum",
-        choices=[],
-        description="Selects store",
-        query_key="store",
-    )
-
     URL = CmdletArg(
         name="url",
         type="string",
@@ -153,15 +145,17 @@ class SharedArgs:
     )
 
     @staticmethod
-    def get_store_choices(config: Optional[Dict[str, Any]] = None, force: bool = False) -> List[str]:
-        if not force and hasattr(SharedArgs, "_cached_available_stores"):
-            return SharedArgs._cached_available_stores or []
+    def get_instance_choices(config: Optional[Dict[str, Any]] = None, force: bool = False) -> List[str]:
+        if not force and hasattr(SharedArgs, "_cached_available_instances"):
+            return SharedArgs._cached_available_instances or []
 
-        SharedArgs._refresh_store_choices_cache(config, skip_instantiation=False)
-        return SharedArgs._cached_available_stores or []
+        SharedArgs._refresh_instance_choices_cache(config, skip_instantiation=False)
+        return SharedArgs._cached_available_instances or []
+
+    get_store_choices = get_instance_choices
 
     @staticmethod
-    def _refresh_store_choices_cache(config: Optional[Dict[str, Any]] = None, skip_instantiation: bool = False) -> None:
+    def _refresh_instance_choices_cache(config: Optional[Dict[str, Any]] = None, skip_instantiation: bool = False) -> None:
         try:
             if config is None:
                 try:
@@ -169,10 +163,10 @@ class SharedArgs:
 
                     config = load_config(emit_summary=False)
                 except Exception:
-                    SharedArgs._cached_available_stores = []
+                    SharedArgs._cached_available_instances = []
                     return
 
-            SharedArgs._cached_available_stores = []
+            SharedArgs._cached_available_instances = []
             if skip_instantiation:
                 return
 
@@ -182,55 +176,18 @@ class SharedArgs:
                 registry = BackendRegistry(config=config, suppress_debug=True)
                 available = registry.list_backends()
                 if available:
-                    SharedArgs._cached_available_stores = available
+                    SharedArgs._cached_available_instances = available
             except Exception:
                 pass
         except Exception:
-            SharedArgs._cached_available_stores = []
+            SharedArgs._cached_available_instances = []
 
-    LOCATION = CmdletArg(
-        "location",
-        type="enum",
-        choices=["hydrus", "0x0"],
-        required=True,
-        description="Destination location",
-    )
+    _refresh_store_choices_cache = _refresh_instance_choices_cache
 
     DELETE = CmdletArg(
         "delete",
         type="flag",
         description="Delete the file after successful operation.",
-    )
-
-    ARTIST = CmdletArg(
-        "artist",
-        type="string",
-        description="Filter by artist name (case-insensitive, partial match).",
-    )
-
-    ALBUM = CmdletArg(
-        "album",
-        type="string",
-        description="Filter by album name (case-insensitive, partial match).",
-    )
-
-    TRACK = CmdletArg(
-        "track",
-        type="string",
-        description="Filter by track title (case-insensitive, partial match).",
-    )
-
-    LIBRARY = CmdletArg(
-        "library",
-        type="string",
-        choices=["hydrus", "local", "soulseek", "libgen", "ftp"],
-        description="Search library or source location.",
-    )
-
-    TIMEOUT = CmdletArg(
-        "timeout",
-        type="integer",
-        description="Search or operation timeout in seconds.",
     )
 
     LIMIT = QueryArg(
@@ -248,19 +205,6 @@ class SharedArgs:
         description="Unified query string (e.g., hash:<sha256>, hash:{<h1>,<h2>}).",
     )
 
-    REASON = CmdletArg(
-        "reason",
-        type="string",
-        description="Reason or explanation for the operation.",
-    )
-
-    ARCHIVE = CmdletArg(
-        "archive",
-        type="flag",
-        description="Archive the URL to Wayback Machine, Archive.today, and Archive.ph (requires URL argument in cmdlet).",
-        alias="arch",
-    )
-
     @staticmethod
     def resolve_storage(
         storage_value: Optional[str],
@@ -270,13 +214,6 @@ class SharedArgs:
         if default is not None:
             return default
         return Path(tempfile.gettempdir())
-
-    @classmethod
-    def get(cls, name: str) -> Optional[CmdletArg]:
-        try:
-            return getattr(cls, name.upper())
-        except AttributeError:
-            return None
 
 
 @dataclass

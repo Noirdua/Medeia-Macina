@@ -1,7 +1,7 @@
 """
 Unified HTTP client for downlow using httpx.
 
-Provides synchronous and asynchronous HTTP operations with:
+Provides synchronous HTTP operations with:
 - Automatic retries on transient failures
 - Configurable timeouts and headers
 - Built-in progress tracking for downloads
@@ -9,7 +9,6 @@ Provides synchronous and asynchronous HTTP operations with:
 """
 
 import httpx
-import asyncio
 import sys
 import time
 import traceback
@@ -658,7 +657,7 @@ def download_direct_file(
         text = str(name or "").strip()
         if not text:
             return ""
-        text = text.replace("/", "\\").split("\\")[-1]
+        text = text.replace("\\", "/").split("/")[-1]
         return _sanitize_filename_base(text, fallback="")
 
     parsed_url = urlparse(url)

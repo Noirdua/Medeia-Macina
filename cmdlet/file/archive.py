@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import sys
 import tarfile
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -15,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from SYS.logger import log
 from PluginCore.registry import get_plugin, plugin_for_storage
 from SYS.item_accessors import get_http_url, get_sha256_hex, get_store_name
-from SYS.utils import extract_hydrus_hash_from_url
+from SYS.utils import default_staging_dir, extract_hydrus_hash_from_url
 
 from SYS import pipeline as ctx
 from SYS.config import resolve_output_dir
@@ -156,7 +155,7 @@ def _resolve_existing_or_fetch_path(item: Any,
                         tmp_base = None
                     out_dir = (
                         Path(str(tmp_base)).expanduser() if tmp_base else
-                        (Path(tempfile.gettempdir()) / "Medios-Macina")
+                        default_staging_dir()
                     )
                     out_dir = out_dir / "archive" / "hydrus"
                     downloaded = _maybe_download_hydrus_item(
@@ -180,7 +179,7 @@ def _resolve_existing_or_fetch_path(item: Any,
         tmp_base = None
     out_dir = (
         Path(str(tmp_base)).expanduser() if tmp_base else
-        (Path(tempfile.gettempdir()) / "Medios-Macina")
+        default_staging_dir()
     )
     out_dir = out_dir / "archive" / "hydrus"
     downloaded = _maybe_download_hydrus_item(item, config, out_dir)

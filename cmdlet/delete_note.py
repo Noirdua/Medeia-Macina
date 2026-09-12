@@ -23,8 +23,8 @@ class Delete_Note(Cmdlet):
     def __init__(self) -> None:
         super().__init__(
             name="delete-note",
-            summary="Delete a named note from a file in a store.",
-            usage='delete-note -instance <store> [-query "hash:<sha256>"] <name>',
+            summary="Delete a named note from a file in an instance.",
+            usage='delete-note -instance <instance> [-query "hash:<sha256>"] <name>',
             alias=["del-note"],
             arg=[
                 SharedArgs.INSTANCE,
@@ -42,7 +42,7 @@ class Delete_Note(Cmdlet):
             exec=self.run,
         )
         try:
-            SharedArgs.INSTANCE.choices = SharedArgs.get_store_choices(None)
+            SharedArgs.INSTANCE.choices = SharedArgs.get_instance_choices(None)
         except Exception:
             pass
         self.register()
