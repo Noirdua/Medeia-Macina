@@ -45,9 +45,11 @@ def _publish(plugin: str = "") -> int:
     from SYS.result_publication import publish_result_table
 
     try:
-        from plugins.torrent.engine import get_engine
+        from PluginCore.registry import plugin_attr
 
-        get_engine()
+        get_engine = plugin_attr("torrent.engine", "get_engine")
+        if callable(get_engine):
+            get_engine()
     except Exception:
         pass
     rows = plugin_jobs.list_jobs(plugin or None)

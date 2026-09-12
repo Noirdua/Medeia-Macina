@@ -61,6 +61,30 @@ HELP_EXAMPLE_SOURCE_COMMANDS = {
 # ---------------------------------------------------------------------------
 
 
+def _table_debug_rows(table: Any) -> List[tuple[str, Any]]:
+    if table is None:
+        return []
+    rows: List[tuple[str, Any]] = []
+    title = str(getattr(table, "title", "") or "").strip()
+    kind = str(getattr(table, "table", "") or "").strip()
+    if title:
+        rows.append(("table", title))
+    if kind:
+        rows.append(("table_type", kind))
+    meta: Any = None
+    try:
+        getter = getattr(table, "get_table_metadata", None)
+        meta = getter() if callable(getter) else getattr(table, "table_metadata", None)
+    except Exception:
+        meta = None
+    if isinstance(meta, dict):
+        for key in ("plugin", "instance", "view", "path"):
+            value = meta.get(key)
+            if value not in (None, ""):
+                rows.append((key, value))
+    return rows
+
+
 def _emit_selection_debug_panel(
     *,
     selection_token: Any,
@@ -73,6 +97,7 @@ def _emit_selection_debug_panel(
     row_action: Optional[Sequence[Any]] = None,
     downstream_stages: Optional[Sequence[Sequence[Any]]] = None,
     mode: Optional[str] = None,
+    source_table: Any = None,
 ) -> None:
     if not is_debug_enabled():
         return
@@ -90,6 +115,10 @@ def _emit_selection_debug_panel(
         ]
         if mode:
             rows.insert(1, ("mode", str(mode)))
+        table_rows = _table_debug_rows(source_table)
+        insert_at = 2 if mode else 1
+        for offset, row in enumerate(table_rows):
+            rows.insert(insert_at + offset, row)
         if row_action:
             rows.append(
                 ("row_action", " ".join(str(part) for part in row_action if part is not None))

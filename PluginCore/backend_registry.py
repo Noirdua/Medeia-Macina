@@ -21,7 +21,10 @@ _PLUGIN_DISCOVERED_CLASSES_CACHE: Dict[str, Optional[Type[BackendBase]]] = {}
 # Keyed by (backend_type, instance_key) where instance_key is the configured name
 # under config.plugin.<type>.<instance_key>.
 _FAILED_BACKEND_CACHE: Dict[tuple[str, str], str] = {}
-_REGISTRY_BY_CONFIG_ID: Dict[int, "BackendRegistry"] = {}
+# Cache of registries keyed by config object id. The tuple holds a strong
+# reference to the config so the id cannot be reused while cached, which would
+# otherwise return a registry bound to a different (freed) config object.
+_REGISTRY_CACHE: Dict[int, tuple[Any, "BackendRegistry"]] = {}
 
 
 def _normalize_backend_type(value: str) -> str:
@@ -380,7 +383,7 @@ class BackendRegistry:
 
 
 def clear_registry_cache() -> None:
-    _REGISTRY_BY_CONFIG_ID.clear()
+    _REGISTRY_CACHE.clear()
 
 
 def get_or_create_registry(
@@ -388,12 +391,12 @@ def get_or_create_registry(
     *,
     suppress_debug: bool = True,
 ) -> BackendRegistry:
-    cfg = config or {}
-    cached = _REGISTRY_BY_CONFIG_ID.get(id(cfg))
-    if cached is not None:
-        return cached
-    registry = BackendRegistry(cfg, suppress_debug=suppress_debug)
-    _REGISTRY_BY_CONFIG_ID[id(cfg)] = registry
+    key = id(config) if config is not None else 0
+    cached = _REGISTRY_CACHE.get(key)
+    if cached is not None and cached[0] is config:
+        return cached[1]
+    registry = BackendRegistry(config or {}, suppress_debug=suppress_debug)
+    _REGISTRY_CACHE[key] = (config, registry)
     return registry
 
 

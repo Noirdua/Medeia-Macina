@@ -1246,6 +1246,7 @@ class PipelineExecutor:
                     row_action=preferred_row_action,
                     downstream_stages=stages,
                     mode=("row_action" if preferred_row_action else "selection"),
+                    source_table=stage_table or display_table,
                 )
                 if not filtered:
                     total = len(items_list)
@@ -2160,6 +2161,18 @@ class PipelineExecutor:
                         for i in selected_indices
                         if 0 <= i < len(resolved_items)
                     ]
+                    _emit_selection_debug_panel(
+                        selection_token=selection_token,
+                        selection_indices=selected_indices,
+                        item_count=len(items_list or []),
+                        filtered_count=len(filtered),
+                        stage_table_present=(stage_table is not None),
+                        display_table_present=(display_table is not None),
+                        stage_is_last=(stage_index + 1 >= len(stages)),
+                        downstream_stages=stages[stage_index + 1 :],
+                        mode="selection",
+                        source_table=stage_table or display_table,
+                    )
                     try:
                         debug(
                             f"Selection {selection_token} -> resolved_indices={selected_indices} filtered_count={len(filtered)}"

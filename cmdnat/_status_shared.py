@@ -166,35 +166,20 @@ def collect_plugin_startup_checks(config: dict) -> list[dict[str, Any]]:
     plugin_cfg = _plugin_config_map(config)
 
     checks: list[dict[str, Any]] = []
-    seen_plugin_keys: set[str] = set()
 
     for info in _iter_registered_plugin_infos():
         plugin_key = str(getattr(info, "canonical_name", "") or "").strip().lower()
         if not plugin_key:
             continue
-        seen_plugin_keys.add(plugin_key)
 
         plugin = None
         summary: dict[str, Any]
         display_name = plugin_display_name(plugin_key)
-        configured_entry = plugin_cfg.get(plugin_key)
-
-        if not (isinstance(configured_entry, dict) and configured_entry):
-            checks.append(
-                {
-                    "status": "DISABLED",
-                    "name": display_name,
-                    "plugin": plugin_key,
-                    "instance": "",
-                    "detail": "Available",
-                    "files": None,
-                }
-            )
-            continue
+        configured_entry: Any = None
 
         try:
             plugin = info.plugin_class(config)
-            configured_entry = plugin.plugin_config_root() or configured_entry
+            configured_entry = plugin.plugin_config_root() or plugin_cfg.get(plugin_key)
             summary = plugin.status_summary()
         except Exception as exc:
             summary = {

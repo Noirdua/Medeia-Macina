@@ -309,6 +309,15 @@ def global_config() -> List[Dict[str, Any]]:
     ]
 
 
+def _clear_registry_cache_safe() -> None:
+    try:
+        from PluginCore.backend_registry import clear_registry_cache
+
+        clear_registry_cache()
+    except Exception:
+        pass
+
+
 def clear_config_cache() -> None:
     """Clear the configuration cache and baseline snapshot."""
     global _CONFIG_CACHE, _LAST_SAVED_CONFIG, _CONFIG_SUMMARY_PENDING
@@ -316,12 +325,7 @@ def clear_config_cache() -> None:
     _LAST_SAVED_CONFIG = {}
     _CONFIG_SUMMARY_PENDING = False
     _multi_instance_plugin_names.cache_clear()
-    try:
-        from PluginCore.backend_registry import clear_registry_cache
-
-        clear_registry_cache()
-    except Exception:
-        pass
+    _clear_registry_cache_safe()
 
 
 def _log_config_load_summary(config: Dict[str, Any]) -> None:
@@ -1485,6 +1489,7 @@ def save_config(config: Dict[str, Any]) -> int:
                     # Refresh local caches to match the disk
                     _CONFIG_CACHE = current_disk
                     _LAST_SAVED_CONFIG = deepcopy(current_disk)
+                    _clear_registry_cache_safe()
                     return 0
                 merged_config = _merge_non_conflicting_config_changes(
                     previous_config,
@@ -1575,6 +1580,7 @@ def save_config(config: Dict[str, Any]) -> int:
 
         _CONFIG_CACHE = refreshed
         _LAST_SAVED_CONFIG = deepcopy(refreshed)
+        _clear_registry_cache_safe()
         # Keep the caller-provided object aligned with the saved baseline so a
         # follow-up edit in the same process does not save a stale tree.
         if isinstance(config, dict) and config is not refreshed:

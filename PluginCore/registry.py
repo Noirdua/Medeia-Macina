@@ -41,10 +41,12 @@ def _config_fingerprint(config: Optional[Dict[str, Any]], plugin_name: str = "")
         payload: Any = config
         if isinstance(config, dict):
             plugin_block = config.get("plugin")
-            if plugin_name and isinstance(plugin_block, dict):
-                payload = plugin_block.get(str(plugin_name).strip().lower())
-            elif isinstance(plugin_block, dict):
-                payload = plugin_block
+            if isinstance(plugin_block, dict):
+                if plugin_name:
+                    entry = plugin_block.get(str(plugin_name).strip().lower())
+                    payload = entry if entry is not None else plugin_block
+                else:
+                    payload = plugin_block
         normalized = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.md5(normalized.encode()).hexdigest()[:16]
     except Exception:
