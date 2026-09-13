@@ -11,6 +11,14 @@ logger = logging.getLogger(__name__)
 
 ConfigField = Dict[str, Any]
 
+_UPLOAD_SIZE_LIMIT_FIELD: ConfigField = {
+    "key": "size_limit",
+    "label": "Max upload size (MB)",
+    "default": "",
+    "required": False,
+    "help": "Skip files larger than this for file -add. Leave blank for no limit.",
+}
+
 
 def _import_plugin_support_module(plugin_name: str) -> Optional[Any]:
     from PluginCore.registry import import_plugin_module
@@ -110,7 +118,18 @@ def get_plugin_schema(plugin_name: str) -> List[ConfigField]:
 
     plugin_class = get_plugin_class(normalized_name)
     if plugin_class is not None:
-        schema = _call_schema(plugin_class, f"plugin '{normalized_name}'")
+        schema = list(_call_schema(plugin_class, f"plugin '{normalized_name}'") or [])
+        try:
+            if plugin_class.supports_add_file():
+                keys = {
+                    str(field.get("key") or "").strip().lower()
+                    for field in schema
+                    if isinstance(field, dict)
+                }
+                if "size_limit" not in keys:
+                    schema.append(_normalize_schema([_UPLOAD_SIZE_LIMIT_FIELD])[0])
+        except Exception:
+            pass
         if schema:
             return schema
 

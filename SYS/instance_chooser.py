@@ -75,6 +75,64 @@ def _inject_instance(tokens: Sequence[str], instance_name: str) -> List[str]:
     return out + ["-instance", str(instance_name)]
 
 
+def _strip_instance_tokens(tokens: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    skip_next = False
+    for tok in tokens or []:
+        if skip_next:
+            skip_next = False
+            continue
+        text = str(tok or "")
+        low = text.replace("_", "-").strip().lower()
+        if low in {"-instance", "--instance"}:
+            skip_next = True
+            continue
+        if low.startswith("-instance=") or low.startswith("--instance="):
+            continue
+        out.append(text)
+    return out
+
+
+def merge_instance_row_actions(
+    actions: Sequence[Optional[Sequence[str]]],
+) -> Optional[List[str]]:
+    """Merge row actions that differ only by ``-instance NAME`` into one command."""
+    from SYS.utils import split_instance_names
+
+    cleaned = [[str(t) for t in action] for action in actions if action]
+    if not cleaned:
+        return None
+    if len(cleaned) == 1:
+        return list(cleaned[0])
+
+    names: List[str] = []
+    template: Optional[List[str]] = None
+    for tokens in cleaned:
+        inst = _token_value(tokens, "-instance", "--instance")
+        if not inst:
+            return None
+        stripped = _strip_instance_tokens(tokens)
+        if template is None:
+            template = stripped
+        elif stripped != template:
+            return None
+        names.extend(split_instance_names(inst))
+
+    if not template or not names:
+        return None
+    uniq: List[str] = []
+    seen: set[str] = set()
+    for name in names:
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(name)
+    if len(uniq) == 1:
+        return _inject_instance(template, uniq[0])
+    return _inject_instance(template, "[" + ",".join(uniq) + "]")
+
+
 def _flatten_stages(stages: Sequence[Sequence[str]]) -> List[str]:
     tokens: List[str] = []
     for idx, stage in enumerate(stages or []):

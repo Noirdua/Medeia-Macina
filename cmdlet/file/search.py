@@ -945,8 +945,9 @@ class search_file(Cmdlet):
                 continue
             if low in instance_flags:
                 if next_arg is not None and not next_is_flag:
-                    instance_name = next_arg
-                    i += 2
+                    from SYS.utils import consume_bracket_list
+
+                    instance_name, i = consume_bracket_list(args_list, i)
                     continue
                 i += 1
                 continue

@@ -395,6 +395,7 @@ def _handle_plugin_upload(
     delete_after: bool,
     folder_name: Optional[str] = None,
     write_metadata: bool = True,
+    query: Optional[str] = None,
 ) -> int:
     """Handle uploading via an add-file plugin (e.g. 0x0)."""
     from PluginCore.registry import (
@@ -425,6 +426,39 @@ def _handle_plugin_upload(
             "pipe_obj": pipe_obj,
             "instance": instance_name,
         }
+        try:
+            _leftover, query_fields = file_provider.extract_query_arguments(str(query or ""))
+        except Exception:
+            query_fields = {}
+        if isinstance(query_fields, dict):
+            for key, value in query_fields.items():
+                if value in (None, ""):
+                    continue
+                upload_kwargs.setdefault(str(key).strip().lower(), value)
+        if instance_name:
+            upload_kwargs["instance"] = instance_name
+
+        try:
+            if file_provider.supports_add_file():
+                limit_bytes = file_provider.upload_size_limit_bytes(instance_name)
+            else:
+                limit_bytes = None
+        except Exception:
+            limit_bytes = None
+        if limit_bytes:
+            try:
+                file_size = int(Path(media_path).stat().st_size)
+            except Exception:
+                file_size = -1
+            if file_size >= 0 and file_size > int(limit_bytes):
+                from SYS.utils import format_bytes
+
+                log(
+                    f"Skipped (over upload limit): {Path(media_path).name} "
+                    f"({format_bytes(file_size)} > {format_bytes(limit_bytes)})",
+                    file=sys.stderr,
+                )
+                return 1
         pipeline_progress = PipelineProgress(ctx)
         normalized_plugin_name = Add_File._normalize_plugin_key(plugin_name)
         f_hash = Add_File._resolve_file_hash(None, media_path, pipe_obj, None)

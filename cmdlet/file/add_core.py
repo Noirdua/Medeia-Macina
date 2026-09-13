@@ -631,6 +631,7 @@ class Add_File(Cmdlet):
                             delete_after_item,
                             folder_name=folder_name,
                             write_metadata=write_metadata,
+                            query=parsed.get("query"),
                         )
                     if code == 0:
                         successes += 1

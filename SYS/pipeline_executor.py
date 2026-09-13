@@ -1090,17 +1090,29 @@ class PipelineExecutor:
             ):
                 selected_row_args: List[str] = []
                 skip_pipe_expansion = source_cmd in {".pipe", ".mpv"} and len(stages) > 0
-                if len(selection_indices) == 1 and not stages:
+                if not stages and selection_indices:
                     try:
-                        row_action = _get_row_action(selection_indices[0])
+                        row_actions = [
+                            _get_row_action(idx) for idx in selection_indices
+                        ]
                     except Exception:
-                        row_action = None
-                    if row_action:
-                        replay = _split_pipeline_tokens(row_action)
+                        row_actions = []
+                    merged_action = None
+                    if len(selection_indices) == 1:
+                        merged_action = row_actions[0] if row_actions else None
+                    else:
+                        try:
+                            from SYS.instance_chooser import merge_instance_row_actions
+
+                            merged_action = merge_instance_row_actions(row_actions)
+                        except Exception:
+                            merged_action = None
+                    if merged_action:
+                        replay = _split_pipeline_tokens(merged_action)
                         if replay:
                             stages[:] = replay
                         else:
-                            stages.insert(0, list(row_action))
+                            stages.insert(0, list(merged_action))
                         return True, None
 
                 if source_cmd and not skip_pipe_expansion and not prefer_row_action:

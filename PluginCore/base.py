@@ -333,6 +333,51 @@ class Plugin(ABC):
         return False
 
     @classmethod
+    def supports_add_file(cls) -> bool:
+        cmdlets = {
+            str(name).replace("_", "-").strip().lower()
+            for name in (cls.SUPPORTED_CMDLETS or ())
+        }
+        return "add-file" in cmdlets
+
+    def upload_size_limit_bytes(self, instance_name: Optional[str] = None) -> Optional[int]:
+        """Optional per-plugin upload cap in bytes, from instance config (MB)."""
+        if not self.supports_add_file():
+            return None
+        try:
+            _resolved, cfg = self.resolve_plugin_instance(instance_name)
+        except Exception:
+            cfg = {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        raw = None
+        for key in ("size_limit", "size_limit_mb", "max_upload_mb", "upload_limit", "max_mb"):
+            if key in cfg and cfg.get(key) not in (None, ""):
+                raw = cfg.get(key)
+                break
+        if raw is None:
+            return None
+        mb: Optional[float] = None
+        try:
+            if isinstance(raw, (int, float)):
+                mb = float(raw)
+            else:
+                text = str(raw or "").strip().lower().replace(",", "")
+                if not text:
+                    return None
+                if text.endswith("gb"):
+                    mb = float(text[:-2].strip()) * 1024.0
+                elif text.endswith("mb"):
+                    mb = float(text[:-2].strip())
+                else:
+                    mb = float(text)
+        except (TypeError, ValueError):
+            return None
+        if mb is None or mb <= 0:
+            return None
+        return int(mb * 1024 * 1024)
+
+    @classmethod
     def config_schema(cls) -> List[Dict[str, Any]]:
         """Return configuration schema for this plugin.
         
