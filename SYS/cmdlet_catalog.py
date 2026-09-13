@@ -513,32 +513,16 @@ def get_cmdlet_arg_choices(
             logger.exception("Failed to parse matrix room ids from config: %r", raw)
             ids = []
 
-        if ids:
-            # Try to resolve names via the Matrix plugin if config provides auth info
-            try:
-                hs = matrix_conf.get("homeserver")
-                token = matrix_conf.get("access_token")
-                if hs and token:
-                    try:
-                        provider = get_plugin("matrix", config)
-                        if provider is not None:
-                            try:
-                                rooms = provider.list_rooms(room_ids=ids)
-                                choices = []
-                                for r in rooms or []:
-                                    name = str(r.get("name") or "").strip()
-                                    rid = str(r.get("room_id") or "").strip()
-                                    choices.append(name or rid)
-                                if choices:
-                                    return choices
-                            except Exception as exc:
-                                logger.exception("Matrix plugin failed while listing rooms: %s", exc)
-                    except Exception as exc:
-                        logger.exception("Failed to initialize Matrix plugin: %s", exc)
-            except Exception as exc:
-                logger.exception("Failed to resolve matrix rooms: %s", exc)
+        try:
+            provider = get_plugin("matrix", config)
+            if provider is not None:
+                cached_names = provider.room_choice_names()
+                if cached_names:
+                    return cached_names
+        except Exception as exc:
+            logger.exception("Failed to load cached Matrix rooms: %s", exc)
 
-            # Fallback: return raw ids as choices
+        if ids:
             return ids
 
     # Default static choices from metadata

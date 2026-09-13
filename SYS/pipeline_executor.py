@@ -2304,6 +2304,16 @@ class PipelineExecutor:
                                 getattr(current_table, "table", None),
                             )
 
+                    if stage_index + 1 < len(stages):
+                        expanded = PipelineExecutor._maybe_expand_plugin_selection(
+                            filtered,
+                            ctx=ctx,
+                            config=config,
+                            stage_table=stage_table or current_table,
+                        )
+                        if expanded:
+                            filtered = expanded
+
                     if PipelineExecutor._maybe_run_class_selector(
                         ctx,
                         config,

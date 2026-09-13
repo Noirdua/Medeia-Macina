@@ -562,19 +562,30 @@ class Add_File(Cmdlet):
                     and not effective_storage_backend_name
                 ):
                     export_destination = Path(location)
-                media_path, file_hash, temp_dir_to_cleanup = self._resolve_source(
-                    item,
-                    source_arg,
-                    pipe_obj,
-                    config,
-                    export_destination=export_destination,
-                    store_instance=storage_registry,
-                    deps=deps,
-                )
-                if not media_path and plugin_name:
-                    media_path, file_hash, temp_dir_to_cleanup = Add_File._download_piped_source(
-                        pipe_obj, config, storage_registry, deps=deps
+                had_progress_key = isinstance(config, dict) and "_pipeline_progress" in config
+                prev_progress = config.get("_pipeline_progress") if isinstance(config, dict) else None
+                if isinstance(config, dict):
+                    config["_pipeline_progress"] = progress
+                try:
+                    media_path, file_hash, temp_dir_to_cleanup = self._resolve_source(
+                        item,
+                        source_arg,
+                        pipe_obj,
+                        config,
+                        export_destination=export_destination,
+                        store_instance=storage_registry,
+                        deps=deps,
                     )
+                    if not media_path and plugin_name:
+                        media_path, file_hash, temp_dir_to_cleanup = Add_File._download_piped_source(
+                            pipe_obj, config, storage_registry, deps=deps
+                        )
+                finally:
+                    if isinstance(config, dict):
+                        if had_progress_key:
+                            config["_pipeline_progress"] = prev_progress
+                        else:
+                            config.pop("_pipeline_progress", None)
                 if not media_path:
                     failures += 1
                     continue

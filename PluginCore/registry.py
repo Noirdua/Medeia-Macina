@@ -940,12 +940,12 @@ def plugin_inline_query_choices(
         info = REGISTRY.get(pname)
         if info is not None:
             mapping = collect_choice(info.plugin_class)
-
-        if not mapping:
-            plugin = get_plugin(pname, config)
-            if plugin is None:
-                return []
-            mapping = collect_choice(plugin)
+        plugin = get_plugin(pname, config)
+        if plugin is not None:
+            instance_map = collect_choice(plugin)
+            for field, choices in instance_map.items():
+                if choices or field not in mapping:
+                    mapping[field] = choices
 
         if not mapping:
             return []
@@ -983,14 +983,18 @@ def plugin_query_field_map(
     if not pname:
         return {}
     try:
+        mapping: Dict[str, List[Dict[str, Any]]] = {}
         info = REGISTRY.get(pname)
         if info is not None:
             mapping = collect_choice(info.plugin_class)
-        else:
-            plugin = get_plugin(pname, config)
-            if plugin is None:
-                return {}
-            mapping = collect_choice(plugin)
+        plugin = get_plugin(pname, config)
+        if plugin is not None:
+            instance_map = collect_choice(plugin)
+            for field, choices in instance_map.items():
+                if choices or field not in mapping:
+                    mapping[field] = choices
+        if not mapping:
+            return {}
         result: Dict[str, List[str]] = {}
         for field, choices in mapping.items():
             texts = []

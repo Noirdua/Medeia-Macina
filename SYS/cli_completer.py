@@ -401,6 +401,8 @@ class CmdletCompleter(Completer):
     @staticmethod
     def _selected_plugin_name(cmd_name: str, stage_tokens: Sequence[str]) -> Optional[str]:
         canonical_cmd = CmdletCompleter._effective_cmd_name(cmd_name, stage_tokens)
+        if canonical_cmd in {".matrix", "matrix", "rooms"}:
+            return "matrix"
         if canonical_cmd not in {"file", "search-file", "add-file", "download-file"}:
             return None
         raw_plugin = CmdletCompleter._flag_value(stage_tokens, "-plugin", "--plugin")
@@ -1716,6 +1718,7 @@ class CmdletCompleter(Completer):
 
                 raw_fragment = str(query_fragment or "")
                 segment = raw_fragment[1:] if raw_fragment[:1] in {"'", '"'} else raw_fragment
+                query_body = segment
                 open_instances = re.search(r"instance:\s*\[([^\]]*)$", segment, flags=re.IGNORECASE)
                 if open_instances and selected_plugin:
                     inner = open_instances.group(1)
@@ -1749,8 +1752,38 @@ class CmdletCompleter(Completer):
                     partial_lower = partial.strip().lower()
 
                     inline_choices = []
-                    if selected_plugin and effective_cmd in {"search-file", "download-file"}:
+                    if selected_plugin and effective_cmd in {
+                        "search-file",
+                        "download-file",
+                        "add-file",
+                        "file",
+                        ".matrix",
+                        "matrix",
+                        "rooms",
+                    }:
                         inline_choices = self._inline_query_choices(selected_plugin, field, config)
+                    if field == "room" and selected_plugin == "matrix":
+                        instance_hint = None
+                        try:
+                            match = re.search(
+                                r"(?:^|[\s,])instance:([^,\s]+)",
+                                query_body,
+                                flags=re.IGNORECASE,
+                            )
+                            if match:
+                                instance_hint = str(match.group(1) or "").strip()
+                        except Exception:
+                            instance_hint = None
+                        try:
+                            from PluginCore.registry import get_plugin
+
+                            matrix_plugin = get_plugin("matrix", config)
+                            if matrix_plugin is not None:
+                                names = matrix_plugin.room_choice_names(instance_hint or None)
+                                if names:
+                                    inline_choices = names
+                        except Exception:
+                            pass
                     if field in {"instance", "store"}:
                         instance_choices = []
                         if selected_plugin:
