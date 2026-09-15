@@ -1828,7 +1828,10 @@ class Table:
             )
 
         if self.title or self.header_lines:
-            header_bits = [_rich().Text(line) for line in (self.header_lines or [])]
+            header_bits = [
+                _rich().Text(line) if isinstance(line, str) else line
+                for line in (self.header_lines or [])
+            ]
             renderable = _rich().Group(*header_bits, table) if header_bits else table
             return (
                 _rich().Panel(

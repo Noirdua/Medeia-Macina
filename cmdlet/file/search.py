@@ -20,6 +20,12 @@ from SYS.database import insert_worker, update_worker, append_worker_stdout
 from SYS.item_accessors import get_extension_field, get_int_field, get_result_title
 from SYS.selection_builder import build_default_selection
 from SYS.result_publication import publish_result_table
+from SYS.system_predicates import (
+    SystemPredicate,
+    parse_system_predicates,
+    render_system_predicate_line,
+    to_native_predicates,
+)
 
 from .._shared import (
     Cmdlet,
@@ -241,6 +247,9 @@ class search_file(Cmdlet):
                 "URL search: url:* (any URL) or url:<value> (URL substring)",
                 "Extension search: ext:<value> (e.g., ext:png)",
                 "Hydrus-style extension: system:filetype = png",
+                "Tag-count system predicates: #tags<=3, #tags>10, #tags=0 (table shows them as system).",
+                "Hydrus native tag-count: system:number of tags > 5, system:has tags, system:untagged.",
+                "Tag-count ops: < <= = == != > >= (Hydrus handles native ops server-side).",
                 "Results include hash for downstream commands (download-file, add-tag, etc.)",
                 "Examples:",
                 "search-file -query foo                              # Search all storage backends",
@@ -253,6 +262,14 @@ class search_file(Cmdlet):
                 "search-file -query 'ext:png'                        # Files whose metadata ext is png",
                 "search-file -query 'system:filetype = png'          # Hydrus: native",
                 "search-file -query 'channel:kabbalah for heretics'   # Namespaced tag (multi-word value)",
+                "search-file -query '#tags<=3'                       # Items carrying 3 or fewer tags",
+                "search-file -query '#tags>10'                       # Items carrying more than 10 tags",
+                "search-file -query '#tags=0'                        # Untagged items",
+                "search-file -query 'system:number of tags > 5'      # Hydrus native: more than 5 tags",
+                "search-file -query 'system:number of tags <= 3'     # Hydrus native: 3 or fewer tags",
+                "search-file -query 'system:untagged'                # Hydrus native: no tags",
+                "search-file -query 'artist:foo #tags>=10'           # Tag query plus tag-count filter",
+                "search-file -query '#tags<=5 ext:mp3'               # Few-tag mp3 files",
                 "search-file 'example.com/path' -query 'ext:pdf'     # Web: site:example.com filetype:pdf",
                 "search-file -query 'site:example.com filetype:epub history'",
                 'search-file "https://example.com/gallery"           # Scrape a page for downloadable file types',
@@ -398,6 +415,18 @@ class search_file(Cmdlet):
         self._set_storage_display_columns(payload)
         return payload
 
+    def _apply_system_predicate_header(
+        self,
+        table: Any,
+        predicates: Optional[Sequence[SystemPredicate]],
+    ) -> None:
+        """Annotate the result table with the active # system predicates."""
+        line = render_system_predicate_line(predicates or [])
+        if line is None or table is None:
+            return
+        existing = list(getattr(table, "header_lines", None) or [])
+        table.header_lines = [*existing, line]
+
     def _run_multi_plugin_search(
         self,
         *,
@@ -411,6 +440,7 @@ class search_file(Cmdlet):
         args_list: List[str],
         refresh_mode: bool,
         config: Dict[str, Any],
+        system_predicates: Optional[List[SystemPredicate]] = None,
     ) -> int:
         if not plugin_names or not query:
             from SYS import pipeline as ctx_mod
@@ -484,6 +514,7 @@ class search_file(Cmdlet):
             table_type = "search"
             table.set_table(table_type)
             table.set_source_command("search-file", args_list)
+            self._apply_system_predicate_header(table, system_predicates)
 
             total_results = 0
             errors: List[str] = []
@@ -620,6 +651,7 @@ class search_file(Cmdlet):
         args_list: List[str],
         refresh_mode: bool,
         config: Dict[str, Any],
+        system_predicates: Optional[List[SystemPredicate]] = None,
     ) -> int:
         """Execute external plugin search."""
 
@@ -720,6 +752,7 @@ class search_file(Cmdlet):
 
             source_cmd, source_args = provider.get_source_command(args_list)
             table.set_source_command(source_cmd, source_args)
+            self._apply_system_predicate_header(table, system_predicates)
 
             debug_panel(
                 "search-file plugin request",
@@ -995,6 +1028,10 @@ class search_file(Cmdlet):
             limit = query_limit
             limit_set = True
 
+        query, system_predicates = parse_system_predicates(query)
+        if system_predicates:
+            query = " ".join([query or "*", *to_native_predicates(system_predicates)]).strip()
+
         if not plugin_name and instance_name and not storage_backend:
             storage_backend = instance_name
 
@@ -1023,6 +1060,7 @@ class search_file(Cmdlet):
                     args_list=args_list,
                     refresh_mode=refresh_mode,
                     config=config,
+                    system_predicates=system_predicates,
                 )
             return self._run_plugin_search(
                 plugin_name=plugin_names[0] if plugin_names else plugin_name,
@@ -1034,6 +1072,7 @@ class search_file(Cmdlet):
                 args_list=args_list,
                 refresh_mode=refresh_mode,
                 config=config,
+                system_predicates=system_predicates,
             )
 
         store_filter: Optional[str] = None
@@ -1126,6 +1165,7 @@ class search_file(Cmdlet):
                     table.set_source_command("search-file", list(args_list))
                 except Exception:
                     pass
+                self._apply_system_predicate_header(table, system_predicates)
                 if hash_query:
                     try:
                         table._perseverance(True)

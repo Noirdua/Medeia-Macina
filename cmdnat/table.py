@@ -24,7 +24,7 @@ _NUMERIC_NAMESPACE_HINTS = {
     "part",
 }
 _COUNT_FILTER_RE = re.compile(
-    r"^@?([A-Za-z][A-Za-z0-9_. -]*?)\s*(<=|>=|!=|<>|==|=|<|>)\s*(\d+)\s*$"
+    r"^[@#]?([A-Za-z][A-Za-z0-9_. -]*?)\s*(<=|>=|!=|<>|==|=|<|>)\s*(\d+)\s*$"
 )
 _SORT_SPEC_RE = re.compile(
     r"^@?(?P<column>[A-Za-z][A-Za-z0-9_. -]*?)\s*\(\s*(?P<body>.*)\s*\)\s*$"
@@ -214,7 +214,7 @@ def _parse_count_filter(text: str) -> Optional[Tuple[str, str, int]]:
     match = _COUNT_FILTER_RE.match(str(text or "").strip().strip('"').strip("'"))
     if not match:
         return None
-    return match.group(1).strip().lstrip("@").strip().lower(), match.group(2), int(match.group(3))
+    return match.group(1).strip().lstrip("@#").strip().lower(), match.group(2), int(match.group(3))
 
 
 def _compare_count(count: int, op: str, bound: int) -> bool:
@@ -740,12 +740,12 @@ CMDLET = Cmdlet(
     name=".table",
     alias=["table"],
     summary="Render, filter, sort, or inspect the active result table.",
-    usage='.table [-filter "@Tag<=3"] [-sort @Tag($part,asc)] [-query "format:desc,namespace:track"] [-print -path <path>]',
+    usage='.table [-filter "@Tag<=3"] [-filter "#tags<=3"] [-sort @Tag($part,asc)] [-query "format:desc,namespace:track"] [-print -path <path>]',
     arg=[
         CmdletArg(
             name="filter",
             type="string",
-            description='Keep rows by column entry count. Name the header with @, e.g. @Tag<=3 or @Title>0.',
+            description='Keep rows by column entry count. Name the header with @, e.g. @Tag<=3 or @Title>0. #tags<=3 is system syntax for the tag column.',
             required=False,
         ),
         CmdletArg(
@@ -795,12 +795,14 @@ CMDLET = Cmdlet(
     ],
     detail=[
         "Name the column with @Header to match the live table header (case-insensitive).",
+        "#tags<N> is system syntax for the tag column, matching search-file's #tags predicate.",
         "Tag-like columns count the real tag list, not the truncated display text.",
         "Ops: < <= = == != > >=",
         "Sort a tag namespace with @Tag($part,asc). part/track/episode values sort numerically.",
     ],
     examples=[
         '.table -filter "@Tag<=3"',
+        '.table -filter "#tags<=3"',
         '.table -filter "@Tag>5"',
         '.table -query "@Title=0"',
         '.table -sort title -query "format:desc"',
