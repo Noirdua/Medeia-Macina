@@ -117,6 +117,7 @@ TOKEN_PATTERN = re.compile(
 KEY_PREFIX_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*:)(.*)$")
 SELECTION_RANGE_RE = re.compile(r"^[0-9\-\*,]+$")
 DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+SYSTEM_TOKEN_RE = re.compile(r"^#([A-Za-z_][A-Za-z0-9_]*)?(<=|>=|!=|==|=|<|>)?(\d+)?(,?)$")
 
 
 class SelectionSyntax:
@@ -463,6 +464,40 @@ class MedeiaLexer(Lexer):
 
             is_cmdlet = True
 
+            def _emit_system_token(word: str) -> bool:
+                """Emit `#tags<=3` system predicates with distinct colors."""
+                match = SYSTEM_TOKEN_RE.match(word)
+                if match is None:
+                    return False
+                field, op, number, comma = match.groups()
+                tokens.append(("class:system_hash", "#"))
+                if field:
+                    tokens.append(("class:system_field", field))
+                if op:
+                    tokens.append(("class:system_op", op))
+                if number:
+                    tokens.append(("class:system_number", number))
+                if comma:
+                    tokens.append(("class:value", comma))
+                return True
+
+            def _emit_plain(text: str, default_class: str) -> bool:
+                """Emit free text, coloring embedded `#system` tokens."""
+                handled = False
+                for chunk in re.split(r"(\s+)", text):
+                    if not chunk:
+                        continue
+                    if chunk.isspace():
+                        tokens.append((default_class, chunk))
+                        handled = True
+                        continue
+                    if _emit_system_token(chunk):
+                        handled = True
+                        continue
+                    tokens.extend(lex_template_inner(chunk, default_class=default_class))
+                    handled = True
+                return handled
+
             def _emit_keyed_value(word: str) -> bool:
                 """Emit `key:` prefixes (comma-separated) as argument tokens.
 
@@ -493,14 +528,10 @@ class MedeiaLexer(Lexer):
                         tokens.append(("class:argument", m.group(1)))
                         rest = m.group(2) or ""
                         if rest:
-                            tokens.extend(
-                                lex_template_inner(rest, default_class="class:value")
-                            )
+                            _emit_plain(rest, "class:value")
                         handled_any = True
                     else:
-                        tokens.extend(
-                            lex_template_inner(part, default_class="class:value")
-                        )
+                        _emit_plain(part, "class:value")
                         handled_any = True
 
                 return handled_any
@@ -527,7 +558,7 @@ class MedeiaLexer(Lexer):
                             is_cmdlet = False
                             continue
                         tokens.append(("class:string", q))
-                        tokens.extend(lex_template_inner(inner, default_class="class:string"))
+                        _emit_plain(inner, "class:string")
                         tokens.append(("class:string", q))
                         is_cmdlet = False
                         continue
@@ -561,7 +592,7 @@ class MedeiaLexer(Lexer):
                 elif word.startswith("-"):
                     tokens.append(("class:argument", word))
                 else:
-                    if not _emit_keyed_value(word):
+                    if not _emit_system_token(word) and not _emit_keyed_value(word):
                         if any(ch in word for ch in "[]$()|") or "(" in word:
                             tokens.extend(lex_template_inner(word, default_class="class:value"))
                         else:

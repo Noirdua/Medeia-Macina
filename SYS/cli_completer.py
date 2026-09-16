@@ -18,6 +18,7 @@ from SYS.cmdlet_catalog import (
     list_cmdlet_names,
 )
 from PluginCore.registry import plugin_inline_query_choices, plugin_query_field_map
+from SYS.system_predicates import iter_system_completions, parse_system_fragment
 
 _ACTIVE_COMPLETER: Optional["CmdletCompleter"] = None
 
@@ -1524,6 +1525,22 @@ class CmdletCompleter(Completer):
                 return token[1:-1]
         return token
 
+    @staticmethod
+    def _system_predicate_fragment(text: str) -> Optional[str]:
+        """Return a trailing ``#system`` token, or None when not completing one."""
+        raw = str(text or "")
+        if "#" not in raw:
+            return None
+        cut = max(raw.rfind(" "), raw.rfind("\t"), raw.rfind("\n"), raw.rfind(","))
+        token = raw[cut + 1:] if cut >= 0 else raw
+        if token[:1] in {"'", '"'}:
+            token = token[1:]
+        if not token.startswith("#") or token[1:2] == "(":
+            return None
+        if parse_system_fragment(token) is None:
+            return None
+        return token
+
     def get_completions(
         self,
         document: Document,
@@ -1542,6 +1559,17 @@ class CmdletCompleter(Completer):
         self._refresh_cmdlet_names()
 
         text = document.text_before_cursor
+
+        system_fragment = self._system_predicate_fragment(text)
+        if system_fragment is not None:
+            for suggestion, helper in iter_system_completions(system_fragment):
+                yield Completion(
+                    suggestion,
+                    start_position=-len(system_fragment),
+                    display_meta=helper,
+                )
+            return
+
         tokens = self._tokenize_quoted(text)
         ends_with_space = bool(text) and text[-1].isspace()
 
