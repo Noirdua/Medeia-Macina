@@ -470,6 +470,8 @@ def _plugin_fingerprint(path: Path) -> str:
         skip_names = {
             "medeia-store-cache.json",
             "medeia-selected-store.json",
+            "medeia-vo-mode.json",
+            "medeia-last-page-url.json",
             "cookies.txt",
             "splash.png",
         }
@@ -499,6 +501,8 @@ def _copy_plugin(src: Path, dest: Path) -> None:
     keep_names = {
         "medeia-store-cache.json",
         "medeia-selected-store.json",
+        "medeia-vo-mode.json",
+        "medeia-last-page-url.json",
         "cookies.txt",
         "splash.png",
     }

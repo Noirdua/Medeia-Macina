@@ -582,7 +582,6 @@ def _collect_existing_url_match_refs_for_url(
     config_dict = config if isinstance(config, dict) else {}
     refs: List[Dict[str, Any]] = []
     seen_pairs: set[tuple[str, str]] = set()
-    seen_backends: set[str] = set()
 
     def _append_ref(backend_name: str, backend: Any, *, item: Any = None, file_hash_hint: Optional[str] = None, is_exact: bool = False) -> None:
         normalized_hash = sh.normalize_hash(str(file_hash_hint) if file_hash_hint is not None else None)
@@ -602,108 +601,259 @@ def _collect_existing_url_match_refs_for_url(
             }
         )
 
-    def _iter_backends() -> List[tuple[str, Any]]:
-        backends: List[tuple[str, Any]] = []
-        if storage is not None:
-            try:
-                backend_names = list(storage.list_searchable_backends() or [])
-            except Exception:
-                backend_names = []
+    for backend_name, backend in cls._iter_storage_backends(storage, config_dict):
+        for candidate in cls._backend_url_match_refs(
+            backend_name,
+            backend,
+            canonical_url,
+            hydrus_available=hydrus_available,
+        ):
+            _append_ref(
+                backend_name,
+                backend,
+                item=candidate.get("item"),
+                file_hash_hint=candidate.get("hash"),
+                is_exact=bool(candidate.get("is_exact")),
+            )
 
-            for backend_name in backend_names:
-                try:
-                    backend = storage[backend_name]
-                except Exception:
-                    continue
-                name_text = str(backend_name).strip()
-                if not name_text or name_text.lower() == "temp":
+    return refs
+
+
+@classmethod
+def _iter_storage_backends(cls, storage: Any, config_dict: Dict[str, Any]) -> List[tuple[str, Any]]:
+    """List searchable storage backends plus configured Hydrus instances."""
+    backends: List[tuple[str, Any]] = []
+    seen_backends: set[str] = set()
+    if storage is not None:
+        try:
+            backend_names = list(storage.list_searchable_backends() or [])
+        except Exception:
+            backend_names = []
+
+        for backend_name in backend_names:
+            try:
+                backend = storage[backend_name]
+            except Exception:
+                continue
+            name_text = str(backend_name).strip()
+            if not name_text or name_text.lower() == "temp":
+                continue
+            key = name_text.lower()
+            if key in seen_backends:
+                continue
+            seen_backends.add(key)
+            backends.append((name_text, backend))
+
+    try:
+        registry_helpers = Download_File._load_provider_registry()
+        get_plugin = registry_helpers.get("get_plugin")
+        hydrus_provider = get_plugin("hydrusnetwork", config_dict) if callable(get_plugin) else None
+        if hydrus_provider is not None:
+            for backend_name, backend in hydrus_provider.iter_backends():
+                name_text = str(backend_name or "").strip()
+                if not name_text:
                     continue
                 key = name_text.lower()
                 if key in seen_backends:
                     continue
                 seen_backends.add(key)
                 backends.append((name_text, backend))
+    except Exception:
+        pass
 
+    try:
+        from SYS.instance_chooser import filter_backends_to_pipeline_instances
+
+        allowed = {
+            str(n).strip().lower()
+            for n in filter_backends_to_pipeline_instances([name for name, _backend in backends])
+        }
+        if allowed:
+            backends = [
+                (name, backend)
+                for name, backend in backends
+                if str(name).strip().lower() in allowed
+            ]
+    except Exception:
+        pass
+
+    return backends
+
+
+@classmethod
+def _backend_url_match_refs(
+    cls,
+    backend_name: str,
+    backend: Any,
+    canonical_url: str,
+    *,
+    hydrus_available: bool,
+) -> List[Dict[str, Any]]:
+    """Return raw URL match refs for one backend using the existing lookup paths."""
+    results: List[Dict[str, Any]] = []
+    try:
+        if not hydrus_available and str(getattr(backend, "STORE_TYPE", "")).strip().lower() == "hydrusnetwork":
+            return results
+    except Exception:
+        pass
+
+    found_exact = False
+    try:
+        lookup_exact = getattr(backend, "find_hashes_by_url", None)
+    except Exception:
+        lookup_exact = None
+    if callable(lookup_exact):
         try:
-            registry_helpers = Download_File._load_provider_registry()
-            get_plugin = registry_helpers.get("get_plugin")
-            hydrus_provider = get_plugin("hydrusnetwork", config_dict) if callable(get_plugin) else None
-            if hydrus_provider is not None:
-                for backend_name, backend in hydrus_provider.iter_backends():
-                    name_text = str(backend_name or "").strip()
-                    if not name_text:
-                        continue
-                    key = name_text.lower()
-                    if key in seen_backends:
-                        continue
-                    seen_backends.add(key)
-                    backends.append((name_text, backend))
+            hashes = lookup_exact(canonical_url) or []
         except Exception:
-            pass
+            hashes = []
+        if isinstance(hashes, (list, tuple, set)):
+            for existing_hash in hashes:
+                normalized_hash = sh.normalize_hash(str(existing_hash) if existing_hash is not None else None)
+                if not normalized_hash:
+                    continue
+                found_exact = True
+                results.append(
+                    {
+                        "backend_name": str(backend_name or "").strip(),
+                        "backend": backend,
+                        "hash": normalized_hash,
+                        "item": None,
+                        "is_exact": True,
+                    }
+                )
+        if found_exact:
+            return results
 
+    try:
+        searcher = getattr(backend, "search", None)
+    except Exception:
+        searcher = None
+    if callable(searcher):
         try:
-            from SYS.instance_chooser import filter_backends_to_pipeline_instances
+            hits = searcher(f"url:{canonical_url}", limit=5, minimal=True) or []
+        except Exception:
+            hits = []
+        for hit in hits:
+            results.append(
+                {
+                    "backend_name": str(backend_name or "").strip(),
+                    "backend": backend,
+                    "hash": None,
+                    "item": hit,
+                    "is_exact": False,
+                }
+            )
+    return results
 
-            allowed = {
-                str(n).strip().lower()
-                for n in filter_backends_to_pipeline_instances([name for name, _backend in backends])
+
+@classmethod
+def _collect_existing_url_match_refs_for_urls(
+    cls,
+    storage: Any,
+    urls: Sequence[str],
+    *,
+    hydrus_available: bool,
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Bulk-collect existing URL match refs, using Hydrus bulk lookup when available."""
+    ordered: List[str] = []
+    for raw in urls or []:
+        text = str(raw or "").strip()
+        if text and text not in ordered:
+            ordered.append(text)
+    refs_by_url: Dict[str, List[Dict[str, Any]]] = {url: [] for url in ordered}
+    if not ordered:
+        return refs_by_url
+
+    config_dict = config if isinstance(config, dict) else {}
+    seen_pairs: set[tuple[str, str, str]] = set()
+
+    def _append_ref(
+        original_url: str,
+        backend_name: str,
+        backend: Any,
+        *,
+        item: Any = None,
+        file_hash_hint: Optional[str] = None,
+        is_exact: bool = False,
+    ) -> None:
+        normalized_hash = sh.normalize_hash(str(file_hash_hint) if file_hash_hint is not None else None)
+        if not normalized_hash:
+            normalized_hash = cls._extract_hash_from_search_hit(item)
+        pair_key = (
+            original_url,
+            str(backend_name or "").strip().lower(),
+            str(normalized_hash or ""),
+        )
+        if pair_key in seen_pairs:
+            return
+        seen_pairs.add(pair_key)
+        refs_by_url.setdefault(original_url, []).append(
+            {
+                "backend_name": str(backend_name or "").strip(),
+                "backend": backend,
+                "hash": normalized_hash,
+                "item": dict(item) if isinstance(item, dict) else item,
+                "is_exact": bool(is_exact),
             }
-            if allowed:
-                backends = [
-                    (name, backend)
-                    for name, backend in backends
-                    if str(name).strip().lower() in allowed
-                ]
-        except Exception:
-            pass
+        )
 
-        return backends
+    lookup_urls = [url for url in ordered if _supports_storage_duplicate_lookup(url)]
 
-    for backend_name, backend in _iter_backends():
+    for backend_name, backend in cls._iter_storage_backends(storage, config_dict):
+        is_hydrus = False
         try:
-            if not hydrus_available and str(getattr(backend, "STORE_TYPE", "")).strip().lower() == "hydrusnetwork":
-                continue
+            is_hydrus = str(getattr(backend, "STORE_TYPE", "")).strip().lower() == "hydrusnetwork"
         except Exception:
-            pass
+            is_hydrus = False
 
-        found_exact = False
-        try:
-            lookup_exact = getattr(backend, "find_hashes_by_url", None)
-        except Exception:
-            lookup_exact = None
-        if callable(lookup_exact):
+        if is_hydrus and not hydrus_available:
+            continue
+
+        bulk_lookup = None
+        if is_hydrus:
             try:
-                hashes = lookup_exact(canonical_url) or []
+                bulk_lookup = getattr(backend, "find_hashes_by_urls", None)
             except Exception:
-                hashes = []
-            if isinstance(hashes, (list, tuple, set)):
-                for existing_hash in hashes:
-                    normalized_hash = sh.normalize_hash(str(existing_hash) if existing_hash is not None else None)
-                    if not normalized_hash:
+                bulk_lookup = None
+        if callable(bulk_lookup) and lookup_urls:
+            try:
+                mapping = bulk_lookup(lookup_urls) or {}
+            except Exception:
+                mapping = {}
+            if isinstance(mapping, dict):
+                for url, hashes in mapping.items():
+                    url_text = str(url or "").strip()
+                    if url_text not in refs_by_url:
                         continue
-                    found_exact = True
-                    _append_ref(
-                        backend_name,
-                        backend,
-                        file_hash_hint=normalized_hash,
-                        is_exact=True,
-                    )
-            if found_exact:
+                    for existing_hash in hashes or []:
+                        _append_ref(
+                            url_text,
+                            backend_name,
+                            backend,
+                            file_hash_hint=existing_hash,
+                            is_exact=True,
+                        )
                 continue
 
-        try:
-            searcher = getattr(backend, "search", None)
-        except Exception:
-            searcher = None
-        if callable(searcher):
-            try:
-                hits = searcher(f"url:{canonical_url}", limit=5, minimal=True) or []
-            except Exception:
-                hits = []
-            for hit in hits:
-                _append_ref(backend_name, backend, item=hit)
+        for url in lookup_urls:
+            for candidate in cls._backend_url_match_refs(
+                backend_name,
+                backend,
+                url,
+                hydrus_available=hydrus_available,
+            ):
+                _append_ref(
+                    url,
+                    backend_name,
+                    backend,
+                    item=candidate.get("item"),
+                    file_hash_hint=candidate.get("hash"),
+                    is_exact=bool(candidate.get("is_exact")),
+                )
 
-    return refs
+    return refs_by_url
 
 
 @classmethod
@@ -842,13 +992,14 @@ def _preflight_explicit_url_duplicates(
     storage, hydrus_available = _init_storage(config)
     duplicate_refs: Dict[str, List[Dict[str, Any]]] = {}
     exact_hashes_by_backend: Dict[str, Dict[str, Any]] = {}
+    refs_by_url = Download_File._collect_existing_url_match_refs_for_urls(
+        storage,
+        urls,
+        hydrus_available=hydrus_available,
+        config=config,
+    )
     for url in urls:
-        refs = Download_File._collect_existing_url_match_refs_for_url(
-            storage,
-            url,
-            hydrus_available=hydrus_available,
-            config=config,
-        )
+        refs = refs_by_url.get(url) or []
         if not refs:
             continue
         duplicate_refs[url] = refs

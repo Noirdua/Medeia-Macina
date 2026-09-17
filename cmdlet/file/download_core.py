@@ -956,6 +956,9 @@ from .download_storage import (  # noqa: E402
     _enrich_duplicate_metadata,
     _fetch_duplicate_metadata_for_hashes,
     _collect_existing_url_match_refs_for_url,
+    _collect_existing_url_match_refs_for_urls,
+    _iter_storage_backends,
+    _backend_url_match_refs,
     _find_existing_url_matches_for_url,
     _find_existing_hash_for_url,
     _find_existing_hashes_for_url,
@@ -1001,6 +1004,9 @@ Download_File._fetch_duplicate_metadata_for_hash = _fetch_duplicate_metadata_for
 Download_File._enrich_duplicate_metadata = _enrich_duplicate_metadata
 Download_File._fetch_duplicate_metadata_for_hashes = _fetch_duplicate_metadata_for_hashes
 Download_File._collect_existing_url_match_refs_for_url = _collect_existing_url_match_refs_for_url
+Download_File._collect_existing_url_match_refs_for_urls = _collect_existing_url_match_refs_for_urls
+Download_File._iter_storage_backends = _iter_storage_backends
+Download_File._backend_url_match_refs = _backend_url_match_refs
 Download_File._find_existing_url_matches_for_url = _find_existing_url_matches_for_url
 Download_File._find_existing_hash_for_url = _find_existing_hash_for_url
 Download_File._find_existing_hashes_for_url = _find_existing_hashes_for_url
