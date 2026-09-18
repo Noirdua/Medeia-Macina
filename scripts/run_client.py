@@ -484,7 +484,7 @@ def install_service_systemd(
 ) -> bool:
     try:
         helper_path = Path(__file__).resolve()
-        print(f"Installing systemd user service via {helper_path}...")
+        print(f"Installing hydrus systemd service via {helper_path}...")
         print("systemctl env:", {
             "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS"),
             "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR"),
@@ -505,6 +505,21 @@ def install_service_systemd(
                 workspace_root=workspace_root
             )
 
+        if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
+            print(
+                "Running as root; installing system-wide systemd service instead."
+            )
+            return install_service_systemd_system(
+                service_name,
+                repo_root,
+                venv_py,
+                headless=headless,
+                detached=detached,
+                pull=pull,
+                workspace_root=workspace_root,
+                service_user=service_user,
+            )
+
         if (
             not os.environ.get("DBUS_SESSION_BUS_ADDRESS")
             or not os.environ.get("XDG_RUNTIME_DIR")
@@ -522,24 +537,10 @@ def install_service_systemd(
                 workspace_root=workspace_root,
             )
 
-        if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
-            print(
-                "Running as root; installing system-wide systemd service instead."
-            )
-            return install_service_systemd_system(
-                service_name,
-                repo_root,
-                venv_py,
-                headless=headless,
-                detached=detached,
-                pull=pull,
-                workspace_root=workspace_root,
-                service_user=service_user,
-            )
-
         unit_dir = Path.home() / ".config" / "systemd" / "user"
         unit_dir.mkdir(parents=True, exist_ok=True)
         unit_file = unit_dir / f"{service_name}.service"
+        _clear_cron_fallback(service_name, repo_root, venv_py)
         
         # Prefer local helper if it exists
         local_helper = repo_root / "run_client.py"
@@ -599,6 +600,9 @@ def install_service_systemd(
         if failed:
             return False
 
+        # Apply a rewritten unit even when the service was already running.
+        _run_systemctl([systemctl, "--user", "restart", f"{service_name}.service"])
+
         print(f"systemd user service '{service_name}' installed and started.")
         return True
     except Exception as exc:
@@ -632,6 +636,35 @@ def uninstall_service_systemd(service_name: str) -> bool:
         return False
 
 
+def _clear_cron_fallback(service_name: str, repo_root: Path, venv_py: Path) -> None:
+    """Remove a leftover @reboot cron entry so it cannot double-start the client."""
+    crontab = shutil.which("crontab")
+    if not crontab:
+        return
+    try:
+        proc = subprocess.run(
+            [crontab, "-l"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return
+        lines = proc.stdout.splitlines()
+        remaining = [line for line in lines if f"# {service_name}" not in line]
+        if len(remaining) == len(lines):
+            return
+        subprocess.run(
+            [crontab, "-"],
+            input="\n".join(remaining) + "\n",
+            text=True,
+            check=True,
+        )
+        print(f"Removed stale cron fallback for '{service_name}'.")
+    except Exception as exc:
+        print(f"Warning: could not clean up cron fallback: {exc}")
+
+
 def install_service_systemd_system(
     service_name: str,
     repo_root: Path,
@@ -657,6 +690,10 @@ def install_service_systemd_system(
                 pull=pull,
                 workspace_root=workspace_root,
             )
+
+        # A previous run may have fallen back to @reboot cron; drop it so the
+        # client cannot be started twice at boot.
+        _clear_cron_fallback(service_name, repo_root, venv_py)
 
         service_home: Optional[Path] = None
         if service_user:
@@ -722,6 +759,8 @@ def install_service_systemd_system(
             [systemctl, "enable", "--now", f"{service_name}.service"],
         ]:
             subprocess.run(cmd, check=True)
+        # Apply a rewritten unit even when the service was already running.
+        subprocess.run([systemctl, "restart", f"{service_name}.service"], check=False)
 
         print(f"system-wide systemd service '{service_name}' enabled and started.")
         return True

@@ -1536,15 +1536,16 @@ def main() -> int:
             print("The client will not start without a Qt binding. Install it manually with:")
             print(f"  {venv_py} -m pip install PySide6")
 
-    def _ensure_run_client_in_target(target_repo: Path) -> Optional[Path]:
+    def _ensure_run_client_in_target(target_repo: Path, refresh: bool = False) -> Optional[Path]:
         """Copy a run_client.py helper into the target repo if it is missing.
 
         The Hydrus installer normally copies this helper, but when it runs from a
         downloaded temp copy it has no run_client.py beside it, so the copy is
         silently skipped. This ensures the target repo always ends up with one.
+        With refresh=True an existing (possibly outdated) helper is replaced.
         """
         target = target_repo / "run_client.py"
-        if target.exists():
+        if target.exists() and not refresh:
             return target
 
         try:
@@ -1623,7 +1624,7 @@ def main() -> int:
             except Exception:
                 pass
 
-        run_client_script = _ensure_run_client_in_target(target_repo)
+        run_client_script = _ensure_run_client_in_target(target_repo, refresh=True)
         if run_client_script is None or not run_client_script.exists():
             local_helper = script_dir / "run_client.py"
             run_client_script = local_helper if local_helper.exists() else None
