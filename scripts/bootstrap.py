@@ -41,6 +41,7 @@ Optional flags:
   --deno-version     Pin a specific Deno version to install (e.g., v1.34.3)
   --upgrade-pip      Upgrade pip, setuptools, and wheel before installing deps
   --check-install    Verify that the 'mm' command was installed correctly
+  --repo-url         Git URL of the Medios-Macina source used to fetch helper scripts
   --debug            Show detailed diagnostic information during installation
   --quiet            Suppress output (used internally by platform scripts)
 """
@@ -52,6 +53,7 @@ import os
 import platform
 import re
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 import shutil
@@ -114,11 +116,68 @@ def run(cmd: list[str], quiet: bool = False, debug: bool = False, cwd: Optional[
         return subprocess.run(cmd, cwd=str(cwd) if cwd else None, env=run_env, stdin=stdin_handle, check=check)
 
 
+FALLBACK_REPO_URLS = (
+    "https://github.com/Noirdua/Medeia-Macina.git",
+    "http://100.115.180.25:3000/Nose/Medeia-Macina.git",
+)
 REPO_URL = str(os.environ.get("MM_REPO_URL") or "").strip()
 HYDRUS_REPO_URL = "https://github.com/hydrusnetwork/hydrus.git"
 HYDRUS_WEB_GUI_REPO_URL = str(os.environ.get("MM_HYDRUS_WEB_GUI_REPO") or "").strip()
-HYDRUS_INSTALLER_SCRIPT_URLS = ()
-RUN_CLIENT_SCRIPT_URLS = ()
+
+
+def repo_url_candidates() -> list[str]:
+    """Git URLs to try for Medios-Macina helper sources (explicit override wins)."""
+    override = str(REPO_URL or "").strip()
+    if override:
+        return [override]
+    return list(FALLBACK_REPO_URLS)
+
+
+def raw_url_candidates(repo_url: str, rel_path: str, branch: str = "main") -> list[str]:
+    """Build raw-file URLs for rel_path from a git repo URL (GitHub and Gitea/Forgejo layouts)."""
+    url = str(repo_url or "").strip().rstrip("/")
+    if not url:
+        return []
+    if url.endswith(".git"):
+        url = url[:-4]
+    rel = rel_path.lstrip("/")
+    parsed = urllib.parse.urlparse(url)
+    host = str(parsed.hostname or "").lower()
+    candidates: list[str] = []
+    if host in {"github.com", "www.github.com"}:
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 2:
+            owner, repo = parts[0], parts[1]
+            candidates.append(
+                f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{rel}"
+            )
+            candidates.append(f"{url}/raw/refs/heads/{branch}/{rel}")
+    elif "://" in url:
+        candidates.append(f"{url}/raw/branch/{branch}/{rel}")
+        candidates.append(f"{url}/raw/refs/heads/{branch}/{rel}")
+    return list(dict.fromkeys(candidates))
+
+
+def hydrus_installer_urls() -> list[str]:
+    """Raw URLs to fetch scripts/hydrusnetwork.py from (env override first)."""
+    urls: list[str] = []
+    override = str(os.environ.get("MM_HYDRUS_INSTALLER_URL") or "").strip()
+    if override:
+        urls.append(override)
+    for repo in repo_url_candidates():
+        urls.extend(raw_url_candidates(repo, "scripts/hydrusnetwork.py"))
+    return list(dict.fromkeys(urls))
+
+
+def run_client_urls() -> list[str]:
+    """Raw URLs to fetch scripts/run_client.py from (env override first)."""
+    urls: list[str] = []
+    override = str(os.environ.get("MM_RUN_CLIENT_URL") or "").strip()
+    if override:
+        urls.append(override)
+    for repo in repo_url_candidates():
+        urls.extend(raw_url_candidates(repo, "scripts/run_client.py"))
+    return list(dict.fromkeys(urls))
 
 
 class ProgressBar:
@@ -557,7 +616,17 @@ def main() -> int:
         action="store_true",
         help="Assume yes for confirmation prompts during uninstall",
     )
+    parser.add_argument(
+        "--repo-url",
+        type=str,
+        default=None,
+        help="Medios-Macina git URL used to fetch helper scripts (default: $MM_REPO_URL or built-in fallbacks)",
+    )
     args = parser.parse_args()
+
+    global REPO_URL
+    if args.repo_url and args.repo_url.strip():
+        REPO_URL = args.repo_url.strip()
 
     if args.install_hydrus_web_gui_service or args.setup_hydrus_web_gui_mpv_handler:
         args.install_hydrus_web_gui = True
@@ -999,10 +1068,10 @@ def main() -> int:
                 print(f"Error setting up temporary installer: {e}")
 
         if hydrus_script is None:
-            print("Falling back to clone the Medios-Macina repository to obtain the helper script...")
+            print("Falling back to cloning the Medios-Macina repository to obtain the helper script...")
             try:
                 temp_mm_repo_dir = Path(tempfile.mkdtemp(prefix="mm_repo_"))
-                if _clone_repo(REPO_URL, temp_mm_repo_dir, depth=1):
+                if _clone_repo_from_candidates(temp_mm_repo_dir, depth=1):
                     hydrus_script = temp_mm_repo_dir / "scripts" / "hydrusnetwork.py"
                     temp_hydrus_repo = temp_mm_repo_dir
                 else:
@@ -1012,6 +1081,7 @@ def main() -> int:
 
         if not hydrus_script or not hydrus_script.exists():
             print("\nError: Hydrus installer script not found.")
+            print("Pass --repo-url <git-url> (or set MM_REPO_URL) so the helper can be fetched, or run bootstrap.py from a repo checkout.")
             return False
 
         cmd = [
@@ -1089,7 +1159,7 @@ def main() -> int:
     def _clone_repo(url: str, dest: Path, depth: int = 1) -> bool:
         """Helper to clone a repository."""
         if not str(url or "").strip():
-            print("Error: repository URL is empty (set MM_REPO_URL).", file=sys.stderr)
+            print("Error: repository URL is empty (set MM_REPO_URL or pass --repo-url).", file=sys.stderr)
             return False
         try:
             cmd = ["git", "clone"]
@@ -1102,10 +1172,30 @@ def main() -> int:
             print(f"Error: Failed to clone repository: {e}", file=sys.stderr)
             return False
 
+    def _clone_repo_from_candidates(dest: Path, depth: int = 1) -> bool:
+        """Clone from the first working Medios-Macina source URL."""
+        candidates = repo_url_candidates()
+        if not candidates:
+            print(
+                "Error: no repository URL configured. Pass --repo-url <git-url> or set MM_REPO_URL.",
+                file=sys.stderr,
+            )
+            return False
+        for url in candidates:
+            print(f"Trying repository source: {url}")
+            if _clone_repo(url, dest, depth=depth):
+                return True
+            shutil.rmtree(dest, ignore_errors=True)
+        return False
+
     def _download_hydrus_installer(dest: Path) -> bool:
         """Download the hydrusnetwork.py helper script into the provided path."""
+        urls = hydrus_installer_urls()
+        if not urls:
+            print("Error: no Hydrus installer source URLs available.", file=sys.stderr)
+            return False
         last_exc: Exception | None = None
-        for url in HYDRUS_INSTALLER_SCRIPT_URLS:
+        for url in urls:
             try:
                 # Add a user-agent to avoid being blocked by some servers
                 req = urllib.request.Request(url, headers={"User-Agent": "Medeia-Macina-Installer"})
@@ -1118,6 +1208,7 @@ def main() -> int:
             print(f"Error: Failed to download Hydrus installer script: {last_exc}", file=sys.stderr)
         else:
             print("Error: Failed to download Hydrus installer script", file=sys.stderr)
+        print(f"Tried: {', '.join(urls)}", file=sys.stderr)
         return False
 
     def _run_hydrus_web_gui_installer(
@@ -1225,9 +1316,10 @@ def main() -> int:
                 print(f"Using existing repository in {install_path}.")
             repo_root = install_path
         else:
+            sources = repo_url_candidates()
             print(f"Cloning Medios-Macina into {install_path} (depth 1)...")
-            print(f"Source: {REPO_URL}")
-            if _clone_repo(REPO_URL, install_path, depth=1):
+            print(f"Source: {sources[0] if sources else '(none configured)'}")
+            if _clone_repo_from_candidates(install_path, depth=1):
                 repo_root = install_path
             else:
                 return False
@@ -1461,6 +1553,11 @@ def main() -> int:
         if target.exists():
             return target
 
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            print(f"Warning: could not prepare {target.parent}: {exc}")
+
         sources = []
         if repo_root:
             sources.append(repo_root / "run_client.py")
@@ -1481,7 +1578,7 @@ def main() -> int:
         # Fallback: download the tracked helper from the repository. This covers
         # standalone/pipe installs where bootstrap.py has no scripts/ beside it.
         print("No local run_client.py found; downloading it...")
-        for url in RUN_CLIENT_SCRIPT_URLS:
+        for url in run_client_urls():
             try:
                 req = urllib.request.Request(
                     url, headers={"User-Agent": "Medeia-Macina-Installer"}
