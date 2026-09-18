@@ -976,7 +976,11 @@ def main() -> int:
                 indent = " " * max((term_width // 2) - (len(prompt) // 2), 0)
                 sys.stdout.write(f"{indent}{prompt}")
                 sys.stdout.flush()
-                choice = sys.stdin.readline().strip().lower()
+                line = sys.stdin.readline()
+                if line == "":
+                    # EOF (e.g. piped install): do not redraw forever.
+                    return "install"
+                choice = line.strip().lower()
                 
                 if choice in ("1", "install", "reinstall"):
                     return "install"
@@ -1482,16 +1486,6 @@ def main() -> int:
         print("✅ Installation check complete!")
         return 0
 
-    def _user_exists(username: str) -> bool:
-        """Return True when a local system user with the given name exists."""
-        try:
-            import pwd
-
-            pwd.getpwnam(username)
-            return True
-        except Exception:
-            return False
-
     def _venv_has_qt_bindings(py: Path) -> bool:
         """Return True when the given Python has a Qt binding (PySide6/PyQt) importable."""
         probe = (
@@ -1619,134 +1613,50 @@ def main() -> int:
         except Exception as exc:
             print(f"Warning: could not install Qt system dependencies: {exc}")
 
-    def _install_systemd_service_direct(
-        target_repo: Path,
-        service_name: str,
-        service_user: str,
-    ) -> bool:
-        """Write and enable a systemd system service that launches the Hydrus client.
+    def _install_hydrus_service(target_repo: Path) -> bool:
+        """Install the headless auto-start service through the run_client helper."""
+        if os.name != "nt":
+            # The offscreen Qt platform needs system libs; the venv needs a Qt binding.
+            _install_qt_system_deps()
+            try:
+                _ensure_qt_bindings(_find_target_venv_python(target_repo))
+            except Exception:
+                pass
 
-        Runs hydrus_client.py directly with the offscreen Qt platform (no display
-        needed), installs any missing Qt system/binding dependencies, and prepares
-        a writable HOME for the service user.
-        """
-        systemctl = shutil.which("systemctl")
-        if not systemctl:
-            print("systemctl not found; cannot install a systemd system service.")
+        run_client_script = _ensure_run_client_in_target(target_repo)
+        if run_client_script is None or not run_client_script.exists():
+            local_helper = script_dir / "run_client.py"
+            run_client_script = local_helper if local_helper.exists() else None
+        if run_client_script is None:
+            print(
+                "Error: run_client.py helper not found; cannot install the service.",
+                file=sys.stderr,
+            )
             return False
 
         venv_py = _find_target_venv_python(target_repo)
-        client_script = target_repo / "hydrus_client.py"
-
-        # Keep a run_client.py helper in the repo for manual use.
-        _ensure_run_client_in_target(target_repo)
-
-        # Install Qt system dependencies (offscreen platform needs GLib etc. on Linux).
-        _install_qt_system_deps()
-
-        # Hydrus needs a Qt binding even when running headless (offscreen).
-        _ensure_qt_bindings(venv_py)
-
-        # Best-effort: create the service user so the unit can run unprivileged.
-        service_home: Optional[Path] = None
-        if service_user and not _user_exists(service_user):
-            useradd = shutil.which("useradd")
-            if useradd:
-                shell = (
-                    "/usr/sbin/nologin"
-                    if Path("/usr/sbin/nologin").exists()
-                    else "/bin/false"
-                )
-                service_home = Path("/var/lib") / service_user
-                try:
-                    subprocess.run(
-                        [
-                            useradd,
-                            "--system",
-                            "--no-create-home",
-                            "--shell",
-                            shell,
-                            "--home-dir",
-                            str(service_home),
-                            service_user,
-                        ],
-                        check=True,
-                    )
-                    print(f"Created service user '{service_user}'.")
-                except Exception as exc:
-                    print(f"Warning: could not create service user '{service_user}': {exc}")
-                    service_home = None
-        elif service_user:
-            service_home = Path("/var/lib") / service_user
-
-        # Provide a writable HOME so Hydrus can write its database and crash logs.
-        if service_user and service_home is not None:
-            try:
-                service_home.mkdir(parents=True, exist_ok=True)
-                if shutil.which("chown"):
-                    subprocess.run(
-                        ["chown", "-R", f"{service_user}:{service_user}", str(service_home)],
-                        check=False,
-                    )
-                print(f"Service data directory: {service_home}")
-            except Exception as exc:
-                print(f"Warning: could not prepare service home {service_home}: {exc}")
-
-        # Launch hydrus_client.py directly with the offscreen Qt platform (no display).
-        exec_line = f'"{venv_py}" "{client_script}"'
-        print("Headless: running hydrus_client.py with QT_QPA_PLATFORM=offscreen")
-
-        unit_lines = [
-            "[Unit]",
-            f"Description=Medios-Macina Hydrus Client ({service_name})",
-            "After=network.target",
-            "",
-            "[Service]",
-            "Type=simple",
-            f"ExecStart={exec_line}",
-            f"WorkingDirectory={target_repo}",
-            "Restart=on-failure",
-            "Environment=PYTHONUNBUFFERED=1",
-            "Environment=QT_QPA_PLATFORM=offscreen",
+        cmd = [
+            str(venv_py),
+            str(run_client_script),
+            "--install-service",
+            "--service-name",
+            "hydrus-client",
+            "--service-user",
+            "hydrusnetwork",
+            "--repo-root",
+            str(target_repo),
+            "--headless",
+            "--pull",
         ]
-        if service_home is not None:
-            unit_lines.append(f"Environment=HOME={service_home}")
-        if service_user:
-            unit_lines.append(f"User={service_user}")
-            unit_lines.append(f"Group={service_user}")
-        unit_lines.extend(
-            [
-                "",
-                "[Install]",
-                "WantedBy=multi-user.target",
-            ]
-        )
-
+        print("Installing the Hydrus service (headless, auto-update on start)...")
         try:
-            unit_dir = Path("/etc/systemd/system")
-            unit_dir.mkdir(parents=True, exist_ok=True)
-            unit_file = unit_dir / f"{service_name}.service"
-            unit_file.write_text("\n".join(unit_lines) + "\n", encoding="utf-8")
-            print(f"Wrote systemd unit: {unit_file}")
-        except PermissionError as exc:
-            print(f"Permission denied while writing systemd unit: {exc}")
+            subprocess.check_call(cmd, stdin=sys.stdin)
+            return True
+        except subprocess.CalledProcessError:
             return False
         except Exception as exc:
-            print(f"Failed to write systemd unit: {exc}")
+            print(f"Error installing service: {exc}", file=sys.stderr)
             return False
-
-        for cmd in [
-            [systemctl, "daemon-reload"],
-            [systemctl, "enable", "--now", f"{service_name}.service"],
-        ]:
-            try:
-                subprocess.run(cmd, check=True)
-            except Exception as exc:
-                print(f"Failed to run {' '.join(cmd)}: {exc}")
-                return False
-
-        print(f"systemd system service '{service_name}' installed and started.")
-        return True
 
     # If no specific action flag is passed and we're in a terminal (or we're being piped), show the menu
     if (sys.stdin.isatty() or sys.stdout.isatty() or script_path is None) and not args.quiet:
@@ -1765,8 +1675,23 @@ def main() -> int:
                 if install_location is None:
                     continue
                 install_root, install_dest, force = install_location
-                _run_standalone_hydrus_install(install_root, install_dest, force=force)
-                print("\nHydrus installation task finished.")
+                installed = _run_standalone_hydrus_install(install_root, install_dest, force=force)
+                if installed:
+                    print("\nHydrus installation task finished.")
+                    service_answer = ""
+                    try:
+                        service_answer = input(
+                            "Install the system service for auto-start now (headless)? [y/N]: "
+                        ).strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        service_answer = ""
+                    if service_answer in {"y", "yes"}:
+                        if _install_hydrus_service(Path(install_root) / install_dest):
+                            print("\nHydrus system service installed and started.")
+                        else:
+                            print("\nHydrus system service installation failed.")
+                else:
+                    print("\nHydrus installation task finished with errors.")
                 sys.stdout.write("Press Enter to return to menu...")
                 sys.stdout.flush()
                 sys.stdin.readline()
@@ -1814,56 +1739,10 @@ def main() -> int:
                     sys.stdin.readline()
                     continue
 
-                # Headless hydrus still needs a Qt binding, so make sure one is
-                # installed before we create the service.
-                try:
-                    _ensure_qt_bindings(_find_target_venv_python(target_repo))
-                except Exception:
-                    pass
-
-                run_client_script = Path(__file__).parent / "run_client.py"
-                if not run_client_script.exists():
-                    # Fallback to target repo's copy if our local one is missing
-                    candidates = [
-                        target_repo / "run_client.py",
-                        target_repo / "scripts" / "run_client.py",
-                    ]
-                    for candidate in candidates:
-                        if candidate.exists():
-                            run_client_script = candidate
-                            break
-
-                if os.name == "nt":
-                    # Windows: delegate to run_client.py (schtasks-based service).
-                    if run_client_script and run_client_script.exists():
-                        try:
-                            subprocess.check_call(
-                                [
-                                    sys.executable,
-                                    str(run_client_script),
-                                    "--install-service",
-                                    "--service-name", "hydrus-client",
-                                    "--service-user", "hydrusnetwork",
-                                    "--repo-root", str(target_repo),
-                                    "--headless",
-                                    "--pull",
-                                ],
-                                stdin=sys.stdin,
-                            )
-                            print("\nHydrus System service installed successfully.")
-                        except subprocess.CalledProcessError:
-                            print("\nService installation failed.")
-                        except Exception as e:
-                            print(f"\nError installing service: {e}")
-                    else:
-                        print("\nrun_client helper not found.")
+                if _install_hydrus_service(target_repo):
+                    print("\nHydrus System service installed successfully.")
                 else:
-                    # Linux: use the direct installer, which ensures Qt bindings,
-                    # prepares a writable HOME, and prefers repo-local run_client.py.
-                    if _install_systemd_service_direct(target_repo, "hydrus-client", "hydrusnetwork"):
-                        print("\nHydrus System service installed successfully.")
-                    else:
-                        print("\nService installation failed.")
+                    print("\nService installation failed.")
                 
                 sys.stdout.write("\nPress Enter to return to menu...")
                 sys.stdout.flush()

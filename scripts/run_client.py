@@ -319,7 +319,7 @@ def _user_exists(username: str) -> bool:
         return False
 
 
-def ensure_service_user(username: str) -> bool:
+def ensure_service_user(username: str, home_dir: Optional[Path] = None) -> bool:
     if not username:
         return False
     if _user_exists(username):
@@ -335,8 +335,10 @@ def ensure_service_user(username: str) -> bool:
         "--no-create-home",
         "--shell",
         shell,
-        username,
     ]
+    if home_dir:
+        cmd.extend(["--home-dir", str(home_dir)])
+    cmd.append(username)
     try:
         subprocess.run(cmd, check=True)
         print(f"Created service user '{username}'.")
@@ -545,7 +547,7 @@ def install_service_systemd(
             local_helper = repo_root / "scripts" / "run_client.py"
         target_script = local_helper if local_helper.exists() else Path(__file__).resolve()
         
-        exec_args = f'"{venv_py}" "{target_script}" --detached '
+        exec_args = f'"{venv_py}" "{target_script}" '
         if headless: exec_args += "--headless "
         if pull: exec_args += "--pull "
         exec_args += f'--repo-root "{repo_root}" '
@@ -656,9 +658,18 @@ def install_service_systemd_system(
                 workspace_root=workspace_root,
             )
 
-        if service_user and not ensure_service_user(service_user):
-            print(f"Unable to prepare service user '{service_user}' for system service.")
-            return False
+        service_home: Optional[Path] = None
+        if service_user:
+            service_home = Path("/var/lib") / service_user
+            if not ensure_service_user(service_user, home_dir=service_home):
+                print(f"Unable to prepare service user '{service_user}' for system service.")
+                return False
+            try:
+                service_home.mkdir(parents=True, exist_ok=True)
+                shutil.chown(service_home, user=service_user, group=service_user)
+                print(f"Service data directory: {service_home}")
+            except Exception as exc:
+                print(f"Warning: could not prepare service home {service_home}: {exc}")
         if service_user and not grant_service_user_repo_access(repo_root, service_user):
             print(
                 f"Failed to assign '{service_user}' as the owner of '{repo_root}'."
@@ -674,7 +685,7 @@ def install_service_systemd_system(
             local_helper = repo_root / "scripts" / "run_client.py"
         target_script = local_helper if local_helper.exists() else Path(__file__).resolve()
 
-        exec_args = f'"{venv_py}" "{target_script}" --detached '
+        exec_args = f'"{venv_py}" "{target_script}" '
         if headless:
             exec_args += "--headless "
         if pull:
@@ -693,6 +704,8 @@ def install_service_systemd_system(
             "Restart=on-failure",
             "Environment=PYTHONUNBUFFERED=1",
         ]
+        if service_home is not None:
+            service_lines.append(f"Environment=HOME={service_home}")
         if service_user:
             service_lines.append(f"User={service_user}")
             service_lines.append(f"Group={service_user}")
