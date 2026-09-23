@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import os
 import re
 
 from SYS.command_parsing import extract_arg_value
@@ -59,15 +60,28 @@ def _split_pipeline_stages(text: str) -> list[str]:
     return stages
 
 
-def _tokenize_stage(stage_text: str) -> list[str]:
-    """Tokenize a stage string (best-effort)."""
+def split_shell_tokens(text: str) -> list[str]:
     import shlex
 
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    if os.name != "nt":
+        return shlex.split(raw)
+    lexer = shlex.shlex(raw, posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    lexer.escape = ""
+    return list(lexer)
+
+
+def _tokenize_stage(stage_text: str) -> list[str]:
+    """Tokenize a stage string (best-effort)."""
     text = str(stage_text or "").strip()
     if not text:
         return []
     try:
-        return shlex.split(text)
+        return split_shell_tokens(text)
     except Exception:
         return text.split()
 

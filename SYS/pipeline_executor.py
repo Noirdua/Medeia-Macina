@@ -441,7 +441,10 @@ class PipelineExecutor:
                 if token.startswith("@"):
                     selection = _cli_parsing().SelectionSyntax.parse(token)
                     if selection is not None:
-                        first_stage_selection_indices = [i - 1 for i in selection]
+                        for idx in selection:
+                            zero = idx - 1
+                            if zero not in first_stage_selection_indices:
+                                first_stage_selection_indices.append(zero)
                         continue
                     if token == "@*":
                         first_stage_select_all = True

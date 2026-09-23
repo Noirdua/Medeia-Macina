@@ -81,6 +81,7 @@ class Database:
         # Reentrant lock to allow nested DB calls within the same thread (e.g., transaction ->
         # get_config_all / save_config_value) without deadlocking.
         self._conn_lock = threading.RLock()
+        self._tx_depth = 0
 
         # Use WAL mode for better concurrency (allows multiple readers + 1 writer)
         # Set a busy timeout so SQLite waits for short locks rather than immediately failing
@@ -157,85 +158,73 @@ class Database:
     def get_connection(self):
         return self.conn
 
+    def _rollback_if_autocommit(self) -> None:
+        if self._tx_depth != 0:
+            return
+        try:
+            self.conn.rollback()
+        except Exception as exc:
+            logger.exception("Rollback failed: %s", exc)
+
     def execute(self, query: str, params: tuple = ()): 
         attempts = 0
         while True:
+            retry_delay = 0.0
             # Serialize access to the underlying sqlite connection to avoid
             # concurrent use from multiple threads which can trigger locks.
             with self._conn_lock:
                 cursor = self.conn.cursor()
                 try:
                     cursor.execute(query, params)
-                    if not self.conn.in_transaction:
+                    if self._tx_depth == 0:
                         self.conn.commit()
                     return cursor
                 except sqlite3.OperationalError as exc:
                     msg = str(exc).lower()
-                    # Retry a few times on transient lock errors
                     if 'locked' in msg and attempts < _DB_EXEC_RETRY_MAX:
                         attempts += 1
-                        delay = _DB_EXEC_RETRY_BASE_DELAY * attempts
-                        log(f"Database locked on execute; retry {attempts}/{_DB_EXEC_RETRY_MAX} in {delay:.2f}s")
-                        try:
-                            if not self.conn.in_transaction:
-                                self.conn.rollback()
-                        except Exception as exc:
-                            logger.exception("Rollback failed while retrying locked execute: %s", exc)
-                        time.sleep(delay)
-                        continue
-                    # Not recoverable or out of retries
-                    if not self.conn.in_transaction:
-                        try:
-                            self.conn.rollback()
-                        except Exception as exc:
-                            logger.exception("Rollback failed in non-recoverable execute path: %s", exc)
-                    raise
+                        retry_delay = _DB_EXEC_RETRY_BASE_DELAY * attempts
+                        log(f"Database locked on execute; retry {attempts}/{_DB_EXEC_RETRY_MAX} in {retry_delay:.2f}s")
+                        self._rollback_if_autocommit()
+                    else:
+                        self._rollback_if_autocommit()
+                        raise
                 except Exception as exc:
-                    if not self.conn.in_transaction:
-                        try:
-                            self.conn.rollback()
-                        except Exception as rb_exc:
-                            logger.exception("Rollback failed during unexpected execute exception: %s", rb_exc)
+                    self._rollback_if_autocommit()
                     logger.exception("Unexpected exception during DB execute: %s", exc)
                     raise
+            if retry_delay:
+                time.sleep(retry_delay)
+                continue
 
     def executemany(self, query: str, param_list: List[tuple]):
         attempts = 0
         while True:
+            retry_delay = 0.0
             with self._conn_lock:
                 cursor = self.conn.cursor()
                 try:
                     cursor.executemany(query, param_list)
-                    if not self.conn.in_transaction:
+                    if self._tx_depth == 0:
                         self.conn.commit()
                     return cursor
                 except sqlite3.OperationalError as exc:
                     msg = str(exc).lower()
                     if 'locked' in msg and attempts < _DB_EXEC_RETRY_MAX:
                         attempts += 1
-                        delay = _DB_EXEC_RETRY_BASE_DELAY * attempts
-                        log(f"Database locked on executemany; retry {attempts}/{_DB_EXEC_RETRY_MAX} in {delay:.2f}s")
-                        try:
-                            if not self.conn.in_transaction:
-                                self.conn.rollback()
-                        except Exception as exc:
-                            logger.exception("Rollback failed while retrying locked executemany: %s", exc)
-                        time.sleep(delay)
-                        continue
-                    if not self.conn.in_transaction:
-                        try:
-                            self.conn.rollback()
-                        except Exception as exc:
-                            logger.exception("Rollback failed in non-recoverable executemany path: %s", exc)
-                    raise
+                        retry_delay = _DB_EXEC_RETRY_BASE_DELAY * attempts
+                        log(f"Database locked on executemany; retry {attempts}/{_DB_EXEC_RETRY_MAX} in {retry_delay:.2f}s")
+                        self._rollback_if_autocommit()
+                    else:
+                        self._rollback_if_autocommit()
+                        raise
                 except Exception as exc:
-                    if not self.conn.in_transaction:
-                        try:
-                            self.conn.rollback()
-                        except Exception as rb_exc:
-                            logger.exception("Rollback failed during unexpected executemany exception: %s", rb_exc)
+                    self._rollback_if_autocommit()
                     logger.exception("Unexpected exception during DB executemany: %s", exc)
                     raise
+            if retry_delay:
+                time.sleep(retry_delay)
+                continue
 
     @contextmanager
     def transaction(self):
@@ -245,25 +234,34 @@ class Database:
         to prevent other threads from performing concurrent operations on the
         same sqlite connection which can lead to locking issues.
         """
-        if self.conn.in_transaction:
-            # Already in a transaction, just yield
-            yield self.conn
-        else:
-            # Hold the connection lock for the lifetime of the transaction
-            self._conn_lock.acquire()
+        self._conn_lock.acquire()
+        nested = self._tx_depth > 0
+        if not nested and self.conn.in_transaction:
             try:
+                self.conn.commit()
+            except Exception:
+                self._rollback_if_autocommit()
+        self._tx_depth += 1
+        try:
+            if not nested:
                 self.conn.execute("BEGIN")
-                try:
-                    yield self.conn
+            try:
+                yield self.conn
+                if not nested:
                     self.conn.commit()
-                except Exception:
-                    self.conn.rollback()
-                    raise
-            finally:
-                try:
-                    self._conn_lock.release()
-                except Exception:
-                    logger.exception("Failed to release DB connection lock")
+            except Exception:
+                if not nested:
+                    try:
+                        self.conn.rollback()
+                    except Exception:
+                        logger.exception("Failed to roll back DB transaction")
+                raise
+        finally:
+            self._tx_depth = max(0, self._tx_depth - 1)
+            try:
+                self._conn_lock.release()
+            except Exception:
+                logger.exception("Failed to release DB connection lock")
 
     def fetchall(self, query: str, params: tuple = ()):
         with self._conn_lock:
@@ -715,12 +713,32 @@ def get_worker(worker_id: str) -> Optional[Dict[str, Any]]:
     )
     return dict(row) if row else None
 
-def expire_running_workers(older_than_seconds: int = 300, status: str = 'error', reason: str = 'timeout') -> int:
-    # SQLITE doesn't have a simple way to do DATETIME - INTERVAL, so we'll use strftime/unixepoch if available
-    # or just do regular update for all running ones for now as a simple fallback
-    query = f"UPDATE workers SET status = ?, error_message = ? WHERE status = 'running'"
+def expire_running_workers(
+    older_than_seconds: int = 300,
+    status: str = 'error',
+    reason: str = 'timeout',
+    worker_id_prefix: Optional[str] = None,
+) -> int:
+    clauses = ["status = 'running'"]
+    params: List[Any] = [status, reason]
+    prefix = str(worker_id_prefix or "").strip()
+    if prefix:
+        clauses.append("id LIKE ?")
+        params.append(prefix)
     try:
-        _worker_db_execute(query, (status, reason), timeout=0.5, retries=0)
+        seconds = max(0, int(older_than_seconds or 0))
     except Exception:
+        seconds = 0
+    if seconds > 0:
+        clauses.append("updated_at < datetime('now', ?)")
+        params.append(f"-{seconds} seconds")
+    query = (
+        "UPDATE workers SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP "
+        f"WHERE {' AND '.join(clauses)}"
+    )
+    try:
+        count = _worker_db_execute(query, tuple(params), timeout=0.5, retries=0)
+        return int(count or 0)
+    except Exception as exc:
+        logger.warning("Failed to expire running workers: %s", exc)
         return 0
-    return 0 # We don't easily get the rowcount from db.execute right now

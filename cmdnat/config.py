@@ -92,6 +92,8 @@ _CONFIG_ITEM_FIELDS = (
     "display_path",
     "instance_target",
     "choices",
+    "plugin",
+    "upload_dest",
 )
 
 CMDLET = Cmdlet(
@@ -1245,6 +1247,8 @@ def _build_nested_config_items(
     value_items.sort(key=lambda item: str(item.get("title") or item.get("name") or "").lower())
     if is_multi_instance_root:
         action_items.append(_build_create_instance_item(parts[0], parts[1]))
+    elif len(parts) == 2 and parts[0] == "plugin":
+        action_items.extend(_build_plugin_upload_items(parts[1]))
     return section_items + value_items + action_items
 
 
@@ -1303,6 +1307,8 @@ def _build_config_header_lines(browse_path: Optional[str]) -> List[str]:
         nav = "Use @N on a setting to choose/edit it, or @N | .config <value> to set it. Delete this instance: .config -delete. Use @.. to go back."
     else:
         nav = "Use @N on a section to drill in. Use @N on a setting to choose/edit it, or @N | .config <value> to set directly. Use @.. to go back."
+    if len(parts) >= 2 and parts[0] == "plugin" and _plugin_upload_rules(parts[1]):
+        nav = nav + " Upload a plugin file with @N on an upload row, or .config -upload."
     return [path_line, *plugin_lines, nav]
 
 
@@ -1557,6 +1563,15 @@ def _show_config_table(
                 idx,
                 [".config", _CREATE_INSTANCE_FLAG, str(item.get("instance_target"))],
             )
+        elif item.get("kind") == "upload":
+            action = [".config", "-upload"]
+            plugin_name = str(item.get("plugin") or "").strip()
+            dest_name = str(item.get("upload_dest") or "").strip()
+            if plugin_name:
+                action.append(plugin_name)
+            if dest_name:
+                action.append(dest_name)
+            table.set_row_selection_action(idx, action)
 
     ctx.set_last_result_table(table, items)
     ctx.set_current_stage_table(table)
@@ -1675,6 +1690,36 @@ def _plugin_upload_rules(plugin_name: str) -> List[Dict[str, Any]]:
     return rules
 
 
+def _build_plugin_upload_items(plugin_name: str) -> List[Dict[str, Any]]:
+    plugin = str(plugin_name or "").strip().lower()
+    if not plugin:
+        return []
+    items: List[Dict[str, Any]] = []
+    plugin_dir = _plugins_dir() / plugin
+    for rule in _plugin_upload_rules(plugin):
+        dest_name = str(rule.get("dest") or "").strip()
+        if not dest_name:
+            continue
+        dest_path = plugin_dir / dest_name
+        label = str(rule.get("label") or "").strip() or _format_config_label(Path(dest_name).stem)
+        exists = dest_path.is_file()
+        items.append(
+            {
+                "kind": "upload",
+                "key": f"plugin.{plugin}.__upload__.{dest_name}",
+                "title": label,
+                "name": dest_name,
+                "plugin": plugin,
+                "upload_dest": dest_name,
+                "value": str(dest_path) if exists else "",
+                "value_display": str(dest_path) if exists else "not set",
+                "summary": str(dest_path) if exists else "Use @N | .config -upload",
+                "type": "upload",
+            }
+        )
+    return items
+
+
 def _upload_rule_matches(rule: Dict[str, Any], source: Path) -> bool:
     name = source.name.lower()
     suffixes = tuple(str(s).lower() for s in (rule.get("suffixes") or ()))
@@ -1686,17 +1731,58 @@ def _upload_rule_matches(rule: Dict[str, Any], source: Path) -> bool:
     return bool(suffixes or needles or True)
 
 
-def _dest_for_upload(plugin_name: str, source: Path) -> Optional[Path]:
+def _dest_hint_matches_rule(rule: Dict[str, Any], dest_hint: str) -> bool:
+    hint = str(dest_hint or "").strip().lower()
+    if not hint:
+        return True
+    dest_name = str(rule.get("dest") or "").strip().lower()
+    label = str(rule.get("label") or "").strip().lower()
+    stem = Path(dest_name).stem.lower()
+    return hint in dest_name or hint in label or hint == stem
+
+
+def _dest_for_upload(plugin_name: str, source: Path, dest_hint: str = "") -> Optional[Path]:
     plugin = str(plugin_name or "").strip().lower()
     if not plugin:
         return None
     for rule in _plugin_upload_rules(plugin):
+        if not _dest_hint_matches_rule(rule, dest_hint):
+            continue
         if not _upload_rule_matches(rule, source):
             continue
         dest_name = str(rule.get("dest") or "").strip()
         if dest_name:
             return _plugins_dir() / plugin / dest_name
     return None
+
+
+def _upload_picker_filters(plugin_name: str, dest_hint: str = "") -> Tuple[List[Tuple[str, str]], str, str]:
+    rules = [
+        rule
+        for rule in _plugin_upload_rules(plugin_name)
+        if _dest_hint_matches_rule(rule, dest_hint)
+    ]
+    suffixes: List[str] = []
+    label = "Upload file"
+    for rule in rules:
+        dest_name = str(rule.get("dest") or "").strip()
+        rule_label = str(rule.get("label") or "").strip()
+        if rule_label:
+            label = f"Upload {rule_label}"
+        elif dest_name:
+            label = f"Upload {dest_name}"
+        for suffix in rule.get("suffixes") or ():
+            text = str(suffix).strip().lower()
+            if text and text not in suffixes:
+                suffixes.append(text)
+    if not suffixes:
+        return [("All files", "*.*")], "All files (*.*)|*.*", label
+    glob = " ".join(f"*{suffix}" for suffix in suffixes)
+    ps_bits = ";".join(f"*{suffix}" for suffix in suffixes)
+    title = rules and (str(rules[0].get("label") or "").strip() or "Files") or "Files"
+    tk_filters = [(title, glob), ("All files", "*.*")]
+    ps_filter = f"{title} ({ps_bits})|{ps_bits}|All files (*.*)|*.*"
+    return tk_filters, ps_filter, label
 
 
 def _plugin_name_from_context(piped_result: Any, extra_token: str) -> str:
@@ -1731,15 +1817,15 @@ def _plugin_name_from_context(piped_result: Any, extra_token: str) -> str:
     return ""
 
 
-def _match_upload_plugin(source: Path, preferred: str) -> str:
-    if preferred and _dest_for_upload(preferred, source) is not None:
+def _match_upload_plugin(source: Path, preferred: str, dest_hint: str = "") -> str:
+    if preferred and _dest_for_upload(preferred, source, dest_hint) is not None:
         return preferred
     names: List[str] = []
     root = _plugins_dir()
     if root.is_dir():
         names = [p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")]
     for name in names:
-        if _dest_for_upload(name, source) is not None:
+        if _dest_for_upload(name, source, dest_hint) is not None:
             return str(name)
     return preferred
 
@@ -1751,13 +1837,33 @@ def _run_upload(piped_result: Any, args: List[str]) -> int:
         if token.lower() in {"-upload", "--upload"}:
             rest = tokens[idx + 1 :]
             break
-    extra_token = rest[0] if rest else ""
+    extra_tokens: List[str] = []
     source_text = ""
-    if extra_token and Path(extra_token).expanduser().is_file():
-        source_text = extra_token
-        extra_token = ""
-    elif len(rest) > 1:
-        source_text = " ".join(rest[1:]).strip().strip('"')
+    for token in rest:
+        path = Path(token).expanduser()
+        if not source_text and path.is_file():
+            source_text = token
+            continue
+        extra_tokens.append(token)
+
+    extra_token = extra_tokens[0] if extra_tokens else ""
+    dest_hint = ""
+    piped_item = _normalize_config_item(piped_result) or {}
+    dest_hint = str(piped_item.get("upload_dest") or "").strip()
+    preferred = _plugin_name_from_context(piped_result, extra_token)
+    if extra_tokens:
+        try:
+            from PluginCore.registry import get_plugin_class
+
+            if get_plugin_class(extra_tokens[0]) is not None:
+                preferred = extra_tokens[0]
+                if len(extra_tokens) > 1:
+                    dest_hint = extra_tokens[1]
+            elif not dest_hint:
+                dest_hint = extra_tokens[0]
+        except Exception:
+            if not dest_hint:
+                dest_hint = extra_tokens[-1]
 
     if not source_text:
         piped_path = _extract_piped_value(piped_result)
@@ -1765,11 +1871,8 @@ def _run_upload(piped_result: Any, args: List[str]) -> int:
             source_text = str(piped_path)
 
     if not source_text:
-        source_text = _pick_open_file(
-            "Upload file",
-            [("All files", "*.*")],
-            "All files (*.*)|*.*",
-        )
+        filters, ps_filter, title = _upload_picker_filters(preferred, dest_hint)
+        source_text = _pick_open_file(title, filters, ps_filter)
     if not source_text:
         status_panel("Upload", [("status", "cancelled")])
         return 0
@@ -1778,8 +1881,8 @@ def _run_upload(piped_result: Any, args: List[str]) -> int:
         status_panel("Upload", [("error", f"File not found: {source}")])
         return 1
 
-    plugin_name = _match_upload_plugin(source, _plugin_name_from_context(piped_result, extra_token))
-    dest = _dest_for_upload(plugin_name, source)
+    plugin_name = _match_upload_plugin(source, preferred, dest_hint)
+    dest = _dest_for_upload(plugin_name, source, dest_hint)
     if dest is None:
         status_panel("Upload", [("error", "No plugin accepted this file")])
         return 1

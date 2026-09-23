@@ -23,7 +23,8 @@ _DEFAULT_USER_AGENT = (
 
 _lock = threading.Lock()
 _MAX_SHARED_CLIENTS = 8
-_shared_clients: "OrderedDict[Tuple[float, Tuple[str, str], Tuple[Tuple[str, str], ...]], httpx.Client]" = OrderedDict()
+_shared_clients: "OrderedDict[Tuple[Any, ...], httpx.Client]" = OrderedDict()
+_retired_clients: list[httpx.Client] = []
 
 
 def _normalize_headers(headers: Optional[Dict[str, str]]) -> Dict[str, str]:
@@ -45,17 +46,12 @@ def _client_key(
     *,
     timeout: float,
     verify_value: Any,
-    merged_headers: Dict[str, str],
     trust_env: bool,
     http2: bool,
 ) -> Tuple[Any, ...]:
-    header_items = tuple(
-        sorted((str(k).lower(), str(v)) for k, v in merged_headers.items())
-    )
     return (
         float(timeout),
         _verify_key(verify_value),
-        header_items,
         bool(trust_env),
         bool(http2),
     )
@@ -72,11 +68,9 @@ def get_shared_httpx_client(
     """Return a shared synchronous httpx.Client for a specific config key."""
 
     verify_value = resolve_verify_value(verify_ssl)
-    merged_headers = _normalize_headers(headers)
     key = _client_key(
         timeout=timeout,
         verify_value=verify_value,
-        merged_headers=merged_headers,
         trust_env=trust_env,
         http2=http2,
     )
@@ -90,7 +84,7 @@ def get_shared_httpx_client(
         client = httpx.Client(
             timeout=timeout,
             verify=verify_value,
-            headers=merged_headers,
+            headers=_normalize_headers(None),
             trust_env=bool(trust_env),
             http2=bool(http2),
         )
@@ -98,18 +92,16 @@ def get_shared_httpx_client(
 
         while len(_shared_clients) > _MAX_SHARED_CLIENTS:
             _, old_client = _shared_clients.popitem(last=False)
-            try:
-                old_client.close()
-            except Exception:
-                pass
+            _retired_clients.append(old_client)
 
         return client
 
 
 def close_shared_httpx_client() -> None:
     with _lock:
-        clients = list(_shared_clients.values())
+        clients = list(_shared_clients.values()) + list(_retired_clients)
         _shared_clients.clear()
+        _retired_clients.clear()
     for client in clients:
         try:
             client.close()

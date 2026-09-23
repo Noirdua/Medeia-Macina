@@ -35,7 +35,6 @@ if not os.environ.get("MM_DEBUG"):
 
 import json
 import re
-import shlex
 import sys
 import threading
 import time
@@ -1313,7 +1312,9 @@ class CLI:
                 pass
 
             try:
-                tokens = shlex.split(command)
+                from SYS.cli_syntax import split_shell_tokens
+
+                tokens = split_shell_tokens(command)
             except ValueError as exc:
                 print(f"Syntax error: {exc}", file=sys.stderr)
                 return
@@ -1813,7 +1814,9 @@ class CLI:
                     pass
 
                 try:
-                    tokens = shlex.split(user_input)
+                    from SYS.cli_syntax import split_shell_tokens
+
+                    tokens = split_shell_tokens(user_input)
                 except ValueError as exc:
                     execution_result = {
                         "status": "failed",

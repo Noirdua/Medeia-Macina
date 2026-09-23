@@ -337,7 +337,8 @@ class WorkerManager:
             return db_expire_running_workers(
                 older_than_seconds=older_than_seconds,
                 status=status,
-                reason=reason or "Stale worker expired"
+                reason=reason or "Stale worker expired",
+                worker_id_prefix=worker_id_prefix,
             )
         except Exception as exc:
             logger.error(f"Failed to expire stale workers: {exc}", exc_info=True)

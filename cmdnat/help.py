@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Sequence, List, Optional, Tuple
-import shlex
 import sys
 
 from SYS.cmdlet_spec import Cmdlet, CmdletArg, collect_registered_cmdlet_names, parse_cmdlet_args
@@ -108,7 +107,9 @@ def _parse_example_tokens(example: str) -> List[str]:
         return []
 
     try:
-        tokens = shlex.split(text)
+        from SYS.cli_syntax import split_shell_tokens
+
+        tokens = split_shell_tokens(text)
     except Exception:
         tokens = text.split()
 

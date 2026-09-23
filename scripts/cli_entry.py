@@ -14,7 +14,6 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-import shlex
 from types import ModuleType
 
 
@@ -208,7 +207,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             clean_args = ["pipeline", "--pipeline", single]
         elif (not single.startswith("-")) and any(ch.isspace() for ch in single):
             try:
-                expanded = shlex.split(single, posix=True)
+                from SYS.cli_syntax import split_shell_tokens
+
+                expanded = split_shell_tokens(single)
                 if expanded:
                     clean_args = list(expanded)
             except Exception:

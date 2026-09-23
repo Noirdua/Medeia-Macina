@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import shlex
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -124,7 +123,9 @@ class PipelineRunner:
             debug(traceback.format_exc())
 
         try:
-            tokens = shlex.split(normalized)
+            from SYS.cli_syntax import split_shell_tokens
+
+            tokens = split_shell_tokens(normalized)
         except Exception as exc:
             result.error = f"Syntax error: {exc}"
             result.stderr = result.error

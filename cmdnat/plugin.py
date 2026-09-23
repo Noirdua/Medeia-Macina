@@ -171,7 +171,7 @@ def _run_remove(names: List[str], args: List[str], config: Dict[str, Any]) -> in
         config,
         names,
         orphans=orphans,
-        delete_files=delete_files or bool(names),
+        delete_files=delete_files,
     )
     table = Table("Uninstalled plugins")
     table._interactive(True)._perseverance(True)
@@ -311,7 +311,7 @@ def _run_install(names: List[str], config: Dict[str, Any], *, update: bool, forc
                 return 1
         names = list(missing) + list(names)
     try:
-        results = install_from_catalog(names, config, force=force or not update)
+        results = install_from_catalog(names, config, force=force)
     except Exception as exc:
         from SYS.logger import log
 

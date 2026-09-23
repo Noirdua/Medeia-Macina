@@ -162,11 +162,31 @@ def _rmtree(path: Path) -> None:
 def _clone_source(url: str, dest: Path, branch: str) -> None:
     _rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    requested = str(branch or "").strip()
     try:
-        _run_git(["clone", "--depth", "1", "--branch", branch, url, str(dest)])
-    except Exception:
+        if requested:
+            _run_git(["clone", "--depth", "1", "--branch", requested, url, str(dest)])
+        else:
+            _run_git(["clone", "--depth", "1", url, str(dest)])
+        return
+    except Exception as exc:
+        if not requested:
+            raise
         _rmtree(dest)
-        _run_git(["clone", "--depth", "1", url, str(dest)])
+        try:
+            _run_git(["clone", "--depth", "1", url, str(dest)])
+        except Exception:
+            raise exc
+        actual = ""
+        try:
+            actual = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=dest).strip()
+        except Exception:
+            actual = ""
+        if actual and actual not in {requested, "HEAD"}:
+            _rmtree(dest)
+            raise RuntimeError(
+                f"Plugin source branch {requested!r} was not cloned (got {actual!r})"
+            ) from exc
 
 
 def sync_plugin_source(config: Optional[Dict[str, Any]] = None) -> Path:
@@ -181,8 +201,13 @@ def sync_plugin_source(config: Optional[Dict[str, Any]] = None) -> Path:
         if (local / ".git").exists():
             try:
                 _run_git(["pull", "--ff-only"], cwd=local)
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    from SYS.logger import debug
+
+                    debug(f"plugin source pull skipped: {exc}")
+                except Exception:
+                    pass
         return local
     branch = plugin_source_branch(config)
     cache = plugin_source_cache_dir()
@@ -511,6 +536,7 @@ def _copy_plugin(src: Path, dest: Path) -> None:
         for child in dest.rglob("*"):
             if child.is_file() and (
                 child.name in keep_names
+                or child.suffix.lower() == ".session"
                 or ("cookie" in child.name.lower() and child.suffix.lower() in {".txt", ".cookies"})
             ):
                 try:
@@ -519,9 +545,13 @@ def _copy_plugin(src: Path, dest: Path) -> None:
                     pass
     if dest.exists():
         if dest.is_file():
-            dest.unlink()
+            try:
+                dest.unlink()
+            except PermissionError:
+                os.chmod(dest, stat.S_IWRITE)
+                dest.unlink()
         else:
-            shutil.rmtree(dest)
+            _rmtree(dest)
     if src.is_file():
         shutil.copy2(src, dest)
         return
