@@ -221,7 +221,21 @@ def _has_cmdlet_method(plugin_class: Type[Plugin], methods: Sequence[str], insta
     return False
 
 
-def _check_cmdlets(plugin_class: Type[Plugin], report: PluginReport, instance: Any = None) -> None:
+def _owns_plugin_commands(plugin_class: Type[Plugin], path: Optional[Path] = None) -> bool:
+    if getattr(plugin_class, "FILE_ACTIONS", None) or getattr(plugin_class, "METADATA_ACTIONS", None):
+        return True
+    if path is not None and path.is_dir() and (path / "commands.py").is_file():
+        return True
+    return False
+
+
+def _check_cmdlets(
+    plugin_class: Type[Plugin],
+    report: PluginReport,
+    instance: Any = None,
+    *,
+    owns_commands: bool = False,
+) -> None:
     raw = getattr(plugin_class, "SUPPORTED_CMDLETS", frozenset())
     try:
         cmdlets = [str(item).strip().lower() for item in (raw or ()) if str(item).strip()]
@@ -229,7 +243,8 @@ def _check_cmdlets(plugin_class: Type[Plugin], report: PluginReport, instance: A
         _issue(report, "error", "cmdlets", "SUPPORTED_CMDLETS must be an iterable of command names")
         return
     if not cmdlets:
-        _issue(report, "warning", "cmdlets", "SUPPORTED_CMDLETS is empty")
+        if not owns_commands:
+            _issue(report, "warning", "cmdlets", "SUPPORTED_CMDLETS is empty")
         return
     unknown = [name for name in cmdlets if name not in KNOWN_CMDLETS]
     if unknown:
@@ -305,6 +320,8 @@ def _validate_plugin_class(
     plugin_class: Type[Plugin],
     folder_name: str,
     report: PluginReport,
+    *,
+    owns_commands: bool = False,
 ) -> None:
     report.plugin_class = plugin_class.__name__
     report.version = str(getattr(plugin_class, "PLUGIN_VERSION", "") or "").strip()
@@ -318,9 +335,9 @@ def _validate_plugin_class(
         instance = plugin_class({})
     except Exception as exc:
         _issue(report, "error", "init", f"Plugin() raised {type(exc).__name__}: {exc}")
-        _check_cmdlets(plugin_class, report)
+        _check_cmdlets(plugin_class, report, owns_commands=owns_commands)
         return
-    _check_cmdlets(plugin_class, report, instance)
+    _check_cmdlets(plugin_class, report, instance, owns_commands=owns_commands)
     try:
         ready = instance.validate()
     except Exception as exc:
@@ -427,7 +444,12 @@ def validate_entry(name: str, path: Path) -> PluginReport:
                 "multiple Plugin subclasses in one module: "
                 + ", ".join(cls.__name__ for cls in owned),
             )
-        _validate_plugin_class(owned[0], folder_name, report)
+        _validate_plugin_class(
+            owned[0],
+            folder_name,
+            report,
+            owns_commands=_owns_plugin_commands(owned[0], path),
+        )
         _check_plugin_commands(path, owned[0], report)
         return report
 

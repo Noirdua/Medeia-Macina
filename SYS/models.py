@@ -636,6 +636,8 @@ class ProgressFileReader:
         total_bytes: Optional[int],
         label: str = "upload",
         min_interval_s: float = 0.25,
+        on_progress: Optional[Any] = None,
+        show_bar: bool = True,
     ):
         self._f = fileobj
         if total_bytes is None:
@@ -647,14 +649,31 @@ class ProgressFileReader:
                 self._total = 0
         self._label = str(label or "upload")
         self._min_interval_s = max(0.05, float(min_interval_s))
-        self._bar = ProgressBar()
+        self._on_progress = on_progress
+        self._show_bar = bool(show_bar)
+        self._bar = ProgressBar() if self._show_bar else None
         self._start = time.time()
         self._last = self._start
+        self._last_cb = 0.0
         self._read = 0
         self._done = False
 
+    def _notify(self, *, final: bool = False) -> None:
+        cb = self._on_progress
+        if not callable(cb):
+            return
+        now = time.time()
+        if not final and self._read > 0 and (now - self._last_cb) < self._min_interval_s:
+            if self._total <= 0 or self._read < self._total:
+                return
+        self._last_cb = now
+        try:
+            cb(int(self._read), int(self._total) if self._total > 0 else None)
+        except Exception:
+            logger.exception("Error while reporting ProgressFileReader progress")
+
     def _render(self) -> None:
-        if self._done:
+        if self._done or self._bar is None:
             return
         if self._total <= 0:
             return
@@ -673,13 +692,16 @@ class ProgressFileReader:
         if self._done:
             return
         self._done = True
-        self._bar.finish()
+        self._notify(final=True)
+        if self._bar is not None:
+            self._bar.finish()
 
     def read(self, size: int = -1) -> Any:
         chunk = self._f.read(size)
         try:
             if chunk:
                 self._read += len(chunk)
+                self._notify()
                 self._render()
             else:
                 # EOF
