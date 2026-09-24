@@ -24,7 +24,7 @@ _DEFAULT_USER_AGENT = (
 _lock = threading.Lock()
 _MAX_SHARED_CLIENTS = 8
 _shared_clients: "OrderedDict[Tuple[Any, ...], httpx.Client]" = OrderedDict()
-_retired_clients: list[httpx.Client] = []
+_retired_clients: "list[httpx.Client]" = []
 
 
 def _normalize_headers(headers: Optional[Dict[str, str]]) -> Dict[str, str]:
@@ -65,7 +65,13 @@ def get_shared_httpx_client(
     trust_env: bool = True,
     http2: bool = False,
 ) -> httpx.Client:
-    """Return a shared synchronous httpx.Client for a specific config key."""
+    """Return a shared synchronous httpx.Client for a specific config key.
+
+    ``headers`` are accepted for backward compatibility but are intentionally
+    not cached: headers are not part of the cache key, so pass them per request
+    on the request itself. Clients are shared safely across callers instead of
+    being closed while another thread is still using them.
+    """
 
     verify_value = resolve_verify_value(verify_ssl)
     key = _client_key(
