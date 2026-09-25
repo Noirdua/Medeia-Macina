@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 import os
 import re
 
-from SYS.command_parsing import extract_arg_value
+from SYS.command_parsing import extract_arg_value, has_flag
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,7 @@ class SyntaxErrorDetail:
     expected: Optional[str] = None
 
 
-def _split_pipeline_stages(text: str) -> list[str]:
+def split_pipeline_stages(text: str) -> list[str]:
     """Split a pipeline command into stage strings on unquoted '|' characters."""
     raw = str(text or "")
     if not raw:
@@ -60,6 +60,21 @@ def _split_pipeline_stages(text: str) -> list[str]:
     return stages
 
 
+def split_pipeline_tokens(tokens: Sequence[str]) -> list[list[str]]:
+    stages: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if str(token) == "|":
+            if current:
+                stages.append(current)
+                current = []
+            continue
+        current.append(str(token))
+    if current:
+        stages.append(current)
+    return [stage for stage in stages if stage]
+
+
 def split_shell_tokens(text: str) -> list[str]:
     import shlex
 
@@ -88,7 +103,7 @@ def _tokenize_stage(stage_text: str) -> list[str]:
 
 def _parse_pipeline_tokens(raw: str) -> list[tuple[str, list[str]]]:
     parsed: list[tuple[str, list[str]]] = []
-    for stage in _split_pipeline_stages(raw):
+    for stage in split_pipeline_stages(raw):
         tokens = _tokenize_stage(stage)
         if not tokens:
             continue
@@ -98,19 +113,9 @@ def _parse_pipeline_tokens(raw: str) -> list[tuple[str, list[str]]]:
 
 
 def _has_flag(tokens: list[str], *flags: str) -> bool:
-    want = {str(f).strip().lower() for f in flags if str(f).strip()}
-    if not want:
+    if not flags:
         return False
-    for tok in tokens:
-        low = str(tok).strip().lower()
-        if low in want:
-            return True
-        # Support -arg=value
-        if "=" in low:
-            head = low.split("=", 1)[0].strip()
-            if head in want:
-                return True
-    return False
+    return has_flag(tokens, flags[0], *flags[1:])
 
 
 def _get_flag_value(tokens: list[str], *flags: str) -> Optional[str]:

@@ -49,6 +49,32 @@ def get(cmd_name: str) -> Cmdlet | None:
     return REGISTRY.get(_normalize_cmd_name(cmd_name))
 
 
+def resolve_cmdlet(cmd_name: str) -> Cmdlet | None:
+    """Return the registered callable, importing its module once if needed.
+
+    Does not reload an already-imported module. Hot-path reload dropped
+    module state and hid import errors.
+    """
+    key = _normalize_cmd_name(cmd_name)
+    found = REGISTRY.get(key)
+    if found is not None:
+        return found
+    try:
+        from SYS.cmdlet_catalog import import_cmd_module
+        from SYS.cmdlet_spec import collect_registered_cmdlet_names
+
+        mod = import_cmd_module(cmd_name, reload_loaded=False)
+        data = getattr(mod, "CMDLET", None) if mod else None
+        run_fn = getattr(data, "exec", None) if data is not None else None
+        if not callable(run_fn):
+            return None
+        for registered_name in collect_registered_cmdlet_names(data, fallback_name=cmd_name):
+            REGISTRY[registered_name] = run_fn
+        return REGISTRY.get(key) or run_fn
+    except Exception:
+        return None
+
+
 _MODULES_LOADED = False
 
 def _iter_cmdlet_module_names() -> Iterator[str]:

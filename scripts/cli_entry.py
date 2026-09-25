@@ -124,13 +124,18 @@ def _run_cli(clean_args: List[str]) -> int:
     if MedeiaCLI is None:
         try:
             repo_root = _ensure_repo_root_on_sys_path()
+            try:
+                from SYS.env_check import apply_debug_from_config
+
+                apply_debug_from_config(repo_root / "medios.db")
+            except Exception:
+                pass
             from CLI import CLI as _M  # type: ignore
             MedeiaCLI = _M
         except Exception as exc:
-            # Provide diagnostic information
             import traceback
             error_msg = (
-                "Could not import 'MedeiaCLI'. This often means the project is not available on sys.path.\n"
+                "Could not import CLI. This often means the project is not available on sys.path.\n"
                 "Diagnostic info:\n"
                 f"  - sys.executable: {sys.executable}\n"
                 f"  - sys.path (first 5): {sys.path[:5]}\n"

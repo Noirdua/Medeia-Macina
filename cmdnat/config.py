@@ -26,7 +26,7 @@ from SYS.plugin_config import (
 )
 from SYS import pipeline as ctx
 from SYS.result_table import Table
-from cmdnat._parsing import (
+from SYS.command_parsing import (
     VALUE_ARG_FLAGS,
     extract_piped_value as _extract_piped_value,
     extract_arg_value as _extract_arg_value,

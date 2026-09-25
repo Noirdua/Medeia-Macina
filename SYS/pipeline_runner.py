@@ -101,9 +101,17 @@ class PipelineRunner:
         isolate: bool = False,
         on_log: Optional[Callable[[str], None]] = None,
     ) -> PipelineRunResult:
-        snapshot: Optional[Dict[str, Any]] = None
         if isolate:
-            snapshot = self._snapshot_ctx_state()
+            from SYS.pipeline_state import new_pipeline_state
+
+            with new_pipeline_state():
+                return self.run_pipeline(
+                    pipeline_text,
+                    seeds=seeds,
+                    seed_table=seed_table,
+                    isolate=False,
+                    on_log=on_log,
+                )
 
         normalized = str(pipeline_text or "").strip()
         result = PipelineRunResult(pipeline=normalized, success=False)
@@ -214,160 +222,21 @@ class PipelineRunner:
         result.emitted = items
         result.result_table = table
 
-        combined = (result.stdout + "\n" + result.stderr).strip().lower()
-        failure_markers = (
-            "unknown command:",
-            "pipeline order error:",
-            "invalid selection:",
-            "invalid pipeline syntax",
-            "failed to execute pipeline",
-            "[error]",
-        )
+        recorded = {}
+        try:
+            recorded = ctx.get_last_execution_result()
+        except Exception:
+            recorded = {}
         if result.error:
             result.success = False
-        elif any(marker in combined for marker in failure_markers):
+        elif isinstance(recorded, dict) and recorded:
+            result.success = bool(recorded.get("success"))
+            if not result.success and not result.error:
+                result.error = str(recorded.get("error") or "Pipeline failed")
+        else:
             result.success = False
             if not result.error:
                 result.error = "Pipeline failed"
-        else:
-            result.success = True
-
-        if isolate and snapshot is not None:
-            try:
-                self._restore_ctx_state(snapshot)
-            except Exception:
-                pass
 
         return result
 
-    @staticmethod
-    def _snapshot_ctx_state() -> Dict[str, Any]:
-        def _copy(value: Any) -> Any:
-            if isinstance(value, list):
-                return value.copy()
-            if isinstance(value, dict):
-                return value.copy()
-            return value
-
-        state = ctx.get_pipeline_state()
-        snapshot: Dict[str, Any] = {}
-        snapshot["live_progress"] = _copy(state.live_progress)
-        snapshot["current_context"] = state.current_context
-        snapshot["last_search_query"] = state.last_search_query
-        snapshot["pipeline_refreshed"] = state.pipeline_refreshed
-        snapshot["last_items"] = _copy(state.last_items)
-        snapshot["last_result_table"] = state.last_result_table
-        snapshot["last_result_items"] = _copy(state.last_result_items)
-        snapshot["last_result_subject"] = state.last_result_subject
-
-        def _copy_history(history: Optional[List[tuple]]) -> List[tuple]:
-            out: List[tuple] = []
-            try:
-                for table_value, items, subject in list(history or []):
-                    if isinstance(items, list):
-                        items_copy = items.copy()
-                    elif items:
-                        items_copy = list(items)
-                    else:
-                        items_copy = []
-                    out.append((table_value, items_copy, subject))
-            except Exception:
-                debug(traceback.format_exc())
-            return out
-
-        snapshot["result_table_history"] = _copy_history(state.result_table_history)
-        snapshot["result_table_forward"] = _copy_history(state.result_table_forward)
-        snapshot["current_stage_table"] = state.current_stage_table
-        snapshot["display_items"] = _copy(state.display_items)
-        snapshot["display_table"] = state.display_table
-        snapshot["display_subject"] = state.display_subject
-        snapshot["last_selection"] = _copy(state.last_selection)
-        snapshot["pipeline_command_text"] = state.pipeline_command_text
-        snapshot["current_cmdlet_name"] = state.current_cmdlet_name
-        snapshot["current_stage_text"] = state.current_stage_text
-        snapshot["pipeline_values"] = (
-            _copy(state.pipeline_values)
-            if isinstance(state.pipeline_values, dict)
-            else state.pipeline_values
-        )
-        snapshot["pending_pipeline_tail"] = [
-            list(stage) for stage in (state.pending_pipeline_tail or [])
-        ]
-        snapshot["pending_pipeline_source"] = state.pending_pipeline_source
-        snapshot["ui_library_refresh_callback"] = state.ui_library_refresh_callback
-        snapshot["pipeline_stop"] = state.pipeline_stop
-        return snapshot
-
-    @staticmethod
-    def _restore_ctx_state(snapshot: Dict[str, Any]) -> None:
-        if not snapshot:
-            return
-
-        state = ctx.get_pipeline_state()
-
-        def _restore_history(key: str, value: Any) -> None:
-            try:
-                if not isinstance(value, list):
-                    return
-                restored: List[tuple] = []
-                for table_value, items, subject in value:
-                    if isinstance(items, list):
-                        items_copy = items.copy()
-                    elif items:
-                        items_copy = list(items)
-                    else:
-                        items_copy = []
-                    restored.append((table_value, items_copy, subject))
-                setattr(state, key, restored)
-            except Exception:
-                debug(traceback.format_exc())
-
-        try:
-            if "live_progress" in snapshot:
-                state.live_progress = snapshot["live_progress"]
-            if "current_context" in snapshot:
-                state.current_context = snapshot["current_context"]
-            if "last_search_query" in snapshot:
-                state.last_search_query = snapshot["last_search_query"]
-            if "pipeline_refreshed" in snapshot:
-                state.pipeline_refreshed = snapshot["pipeline_refreshed"]
-            if "last_items" in snapshot:
-                state.last_items = snapshot["last_items"] or []
-            if "last_result_table" in snapshot:
-                state.last_result_table = snapshot["last_result_table"]
-            if "last_result_items" in snapshot:
-                state.last_result_items = snapshot["last_result_items"] or []
-            if "last_result_subject" in snapshot:
-                state.last_result_subject = snapshot["last_result_subject"]
-            if "result_table_history" in snapshot:
-                _restore_history("result_table_history", snapshot["result_table_history"])
-            if "result_table_forward" in snapshot:
-                _restore_history("result_table_forward", snapshot["result_table_forward"])
-            if "current_stage_table" in snapshot:
-                state.current_stage_table = snapshot["current_stage_table"]
-            if "display_items" in snapshot:
-                state.display_items = snapshot["display_items"] or []
-            if "display_table" in snapshot:
-                state.display_table = snapshot["display_table"]
-            if "display_subject" in snapshot:
-                state.display_subject = snapshot["display_subject"]
-            if "last_selection" in snapshot:
-                state.last_selection = snapshot["last_selection"] or []
-            if "pipeline_command_text" in snapshot:
-                state.pipeline_command_text = snapshot["pipeline_command_text"] or ""
-            if "current_cmdlet_name" in snapshot:
-                state.current_cmdlet_name = snapshot["current_cmdlet_name"] or ""
-            if "current_stage_text" in snapshot:
-                state.current_stage_text = snapshot["current_stage_text"] or ""
-            if "pipeline_values" in snapshot:
-                state.pipeline_values = snapshot["pipeline_values"] or {}
-            if "pending_pipeline_tail" in snapshot:
-                state.pending_pipeline_tail = snapshot["pending_pipeline_tail"] or []
-            if "pending_pipeline_source" in snapshot:
-                state.pending_pipeline_source = snapshot["pending_pipeline_source"]
-            if "ui_library_refresh_callback" in snapshot:
-                state.ui_library_refresh_callback = snapshot["ui_library_refresh_callback"]
-            if "pipeline_stop" in snapshot:
-                state.pipeline_stop = snapshot["pipeline_stop"]
-        except Exception:
-            pass

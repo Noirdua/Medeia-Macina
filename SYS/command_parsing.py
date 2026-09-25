@@ -64,12 +64,20 @@ def extract_value_arg(args: Sequence[str]) -> Optional[str]:
     return extract_arg_value(args, flags=VALUE_ARG_FLAGS, allow_positional=True)
 
 
-def has_flag(args: Sequence[str], flag: str) -> bool:
+def has_flag(args: Sequence[str], flag: str, *more: str) -> bool:
     try:
-        want = str(flag or "").strip().lower()
+        want = {str(flag or "").strip().lower()}
+        want.update(str(item or "").strip().lower() for item in more)
+        want.discard("")
         if not want:
             return False
-        return any(str(arg).strip().lower() == want for arg in (args or []))
+        for arg in args or []:
+            low = str(arg).strip().lower()
+            if low in want:
+                return True
+            if "=" in low and low.split("=", 1)[0].strip() in want:
+                return True
+        return False
     except Exception:
         return False
 

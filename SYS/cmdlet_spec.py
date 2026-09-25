@@ -362,7 +362,13 @@ def parse_cmdlet_args(
             is_flag = bool(spec and str(getattr(spec, "type", "")).lower() == "flag")
 
             if is_flag:
-                result[canonical_name] = True
+                alias = str(getattr(spec, "alias", "") or "").strip().lower()
+                name_key = canonical_name.lower()
+                negated = token_lower in {
+                    f"--no-{name_key}",
+                    f"-no{name_key}",
+                } or (bool(alias) and token_lower == f"-n{alias}")
+                result[canonical_name] = not negated
                 i += 1
             else:
                 if i + 1 < len(args) and not str(args[i + 1]).startswith("-"):

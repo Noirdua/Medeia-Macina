@@ -1345,7 +1345,7 @@ def load_config(*, emit_summary: bool = False) -> Dict[str, Any]:
         if emit_summary and _CONFIG_SUMMARY_PENDING:
             _log_config_load_summary(_CONFIG_CACHE)
             _CONFIG_SUMMARY_PENDING = False
-        return _CONFIG_CACHE
+        return deepcopy(_CONFIG_CACHE)
 
     # Load strictly from database
     db_config = get_config_all()
@@ -1361,7 +1361,7 @@ def load_config(*, emit_summary: bool = False) -> Dict[str, Any]:
             _CONFIG_SUMMARY_PENDING = True
 
         # Forensics disabled: audit/mismatch/backup detection removed to simplify code.
-        return db_config
+        return deepcopy(db_config)
 
     _LAST_SAVED_CONFIG = {}
     return {}

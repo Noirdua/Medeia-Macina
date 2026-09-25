@@ -7,7 +7,7 @@ from SYS.cmdlet_spec import Cmdlet, CmdletArg
 from SYS import pipeline as ctx
 from SYS.result_table import Table
 from SYS.result_table_helpers import add_row_columns
-from cmdnat._parsing import extract_arg_value, has_flag
+from SYS.command_parsing import extract_arg_value, has_flag
 from PluginCore.validate import validate_plugins
 from PluginCore.lifecycle import uninstall_plugins
 from PluginCore.source import (

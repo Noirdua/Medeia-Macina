@@ -142,6 +142,29 @@ def ensure_urllib3_ok(exit_on_error: bool = True) -> bool:
     return False
 
 
+def apply_debug_from_config(db_path: Path) -> None:
+    """Set MM_DEBUG from the config database without doing it at import time."""
+    import os
+    import sqlite3
+
+    if os.environ.get("MM_DEBUG"):
+        return
+    try:
+        if not db_path.exists():
+            return
+        with sqlite3.connect(str(db_path), timeout=5.0) as conn:
+            row = conn.execute(
+                "SELECT value FROM config WHERE key = 'debug' AND category = 'global'"
+            ).fetchone()
+        if not row:
+            return
+        val = str(row[0]).strip().lower()
+        if val in {"1", "true", "yes", "on"}:
+            os.environ["MM_DEBUG"] = "1"
+    except Exception:
+        debug("Failed to read debug flag from config database", exc_info=True)
+
+
 if __name__ == "__main__":  # pragma: no cover - manual debugging helper
     ok, message = check_urllib3_compat()
     print(message)

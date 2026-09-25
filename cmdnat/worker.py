@@ -14,7 +14,7 @@ from SYS.cli_syntax import parse_query
 from SYS import pipeline as ctx
 from SYS.logger import log
 from SYS.database import db as _db, get_worker_stdout
-from cmdnat._parsing import extract_arg_value, has_flag
+from SYS.command_parsing import extract_arg_value, has_flag
 from PluginCore.base import parse_inline_query_arguments
 from SYS.cmdlet_spec import QueryArg
 

@@ -7,32 +7,6 @@ This module intentionally uses a class-based architecture:
 - all REPL/pipeline/cmdlet execution state lives on objects
 """
 
-# When running the CLI directly (not via the 'mm' launcher), honor the
-# repository config `debug` flag by enabling `MM_DEBUG` so import-time
-# diagnostics and bootstrap debug output are visible without setting the
-# environment variable manually.
-import os
-from pathlib import Path
-if not os.environ.get("MM_DEBUG"):
-    try:
-        # Check database first
-        db_path = Path(__file__).resolve().parent / "medios.db"
-        if db_path.exists():
-            import sqlite3
-            with sqlite3.connect(str(db_path), timeout=30.0) as conn:
-                cur = conn.cursor()
-                # Check for global debug key
-                cur.execute("SELECT value FROM config WHERE key = 'debug' AND category = 'global'")
-                row = cur.fetchone()
-                if row:
-                    val = str(row[0]).strip().lower()
-                    if val in ("1", "true", "yes", "on"):
-                        os.environ["MM_DEBUG"] = "1"
-    except Exception:
-        import logging as _logging
-        _logger = _logging.getLogger("CLI")
-        _logger.debug("Failed to check database for debug flag on startup", exc_info=True)
-
 import json
 import re
 import sys
@@ -341,877 +315,6 @@ class ConfigLoader:
             return {}
 
 
-class CmdletHelp:
-
-    @staticmethod
-    def show_cmdlet_list() -> None:
-        try:
-            metadata = list_cmdlet_metadata() or {}
-            from rich.box import SIMPLE
-            from rich.panel import Panel
-            from rich.table import Table as RichTable
-
-            table = RichTable(
-                show_header=True,
-                header_style="bold",
-                box=SIMPLE,
-                expand=True
-            )
-            table.add_column("Cmdlet", no_wrap=True)
-            table.add_column("Aliases")
-            table.add_column("Args")
-            table.add_column("Summary")
-
-            for cmd_name in sorted(metadata.keys()):
-                info = metadata[cmd_name]
-                aliases = info.get("aliases", [])
-                args = info.get("args", [])
-                summary = info.get("summary") or ""
-                alias_str = ", ".join(
-                    [str(a) for a in (aliases or []) if str(a).strip()]
-                )
-                arg_names = [
-                    a.get("name") for a in (args or [])
-                    if isinstance(a, dict) and a.get("name")
-                ]
-                args_str = ", ".join([str(a) for a in arg_names if str(a).strip()])
-                table.add_row(str(cmd_name), alias_str, args_str, str(summary))
-
-            stdout_console().print(Panel(table, title="Cmdlets", expand=False))
-        except Exception as exc:
-            from rich.panel import Panel
-            from rich.text import Text
-
-            stderr_console().print(
-                Panel(Text(f"Error: {exc}"),
-                      title="Error",
-                      expand=False)
-            )
-
-    @staticmethod
-    def show_cmdlet_help(cmd_name: str) -> None:
-        try:
-            meta = get_cmdlet_metadata(cmd_name)
-            if meta:
-                CmdletHelp._print_metadata(cmd_name, meta)
-                return
-            print(f"Unknown command: {cmd_name}\n")
-        except Exception as exc:
-            print(f"Error: {exc}\n")
-
-    @staticmethod
-    def _print_metadata(cmd_name: str, data: Any) -> None:
-        d = data.to_dict() if hasattr(data, "to_dict") else data
-        if not isinstance(d, dict):
-            from rich.panel import Panel
-            from rich.text import Text
-
-            stderr_console().print(
-                Panel(
-                    Text(f"Invalid metadata for {cmd_name}"),
-                    title="Error",
-                    expand=False
-                )
-            )
-            return
-
-        name = d.get("name", cmd_name)
-        summary = d.get("summary", "")
-        usage = d.get("usage", "")
-        description = d.get("description", "")
-        args = d.get("args", [])
-        details = d.get("details", [])
-
-        from rich.box import SIMPLE
-        from rich.console import Group
-        from rich.panel import Panel
-        from rich.table import Table as RichTable
-        from rich.text import Text
-
-        header = Text.assemble((str(name), "bold"))
-        synopsis = Text(str(usage or name))
-        stdout_console().print(
-            Panel(Group(header,
-                        synopsis),
-                  title="Help",
-                  expand=False)
-        )
-
-        if summary or description:
-            desc_bits: List[Text] = []
-            if summary:
-                desc_bits.append(Text(str(summary)))
-            if description:
-                desc_bits.append(Text(str(description)))
-            stdout_console().print(
-                Panel(Group(*desc_bits),
-                      title="Description",
-                      expand=False)
-            )
-
-        if args and isinstance(args, list):
-            param_table = RichTable(
-                show_header=True,
-                header_style="bold",
-                box=SIMPLE,
-                expand=True
-            )
-            param_table.add_column("Arg", no_wrap=True)
-            param_table.add_column("Type", no_wrap=True)
-            param_table.add_column("Required", no_wrap=True)
-            param_table.add_column("Description")
-            for arg in args:
-                if isinstance(arg, dict):
-                    name_str = arg.get("name", "?")
-                    typ = arg.get("type", "string")
-                    required = bool(arg.get("required", False))
-                    desc = arg.get("description", "")
-                else:
-                    name_str = getattr(arg, "name", "?")
-                    typ = getattr(arg, "type", "string")
-                    required = bool(getattr(arg, "required", False))
-                    desc = getattr(arg, "description", "")
-
-                param_table.add_row(
-                    f"-{name_str}",
-                    str(typ),
-                    "yes" if required else "no",
-                    str(desc or "")
-                )
-
-            stdout_console().print(Panel(param_table, title="Parameters", expand=False))
-
-        if details:
-            stdout_console().print(
-                Panel(
-                    Group(*[Text(str(x)) for x in details]),
-                    title="Remarks",
-                    expand=False
-                )
-            )
-
-
-class CmdletExecutor:
-
-    def __init__(self, *, config_loader: ConfigLoader) -> None:
-        self._config_loader = config_loader
-
-    @staticmethod
-    def _get_table_title_for_command(
-        cmd_name: str,
-        emitted_items: Optional[List[Any]] = None,
-        cmd_args: Optional[List[str]] = None,
-    ) -> str:
-        normalized_cmd = str(cmd_name or "").replace("_", "-").lower().strip()
-        mapped_cmd = CmdletCompleter._effective_cmd_name(normalized_cmd, cmd_args or [])
-
-        title_map = {
-            "search-file": "Results",
-            "search_file": "Results",
-            "download-data": "Downloads",
-            "download_data": "Downloads",
-            "download-file": "Downloads",
-            "download_file": "Downloads",
-            "metadata": "Tags",
-            "add-url": "Results",
-            "add_url": "Results",
-            "get-url": "url",
-            "get_url": "url",
-            "delete-url": "Results",
-            "delete_url": "Results",
-            "get-note": "Notes",
-            "get_note": "Notes",
-            "add-note": "Results",
-            "add_note": "Results",
-            "delete-note": "Results",
-            "delete_note": "Results",
-            "get-relationship": "Relationships",
-            "get_relationship": "Relationships",
-            "add-relationship": "Results",
-            "add_relationship": "Results",
-            "add-file": "Results",
-            "add_file": "Results",
-            "delete-file": "Results",
-            "delete_file": "Results",
-            "get-metadata": None,
-            "get_metadata": None,
-        }
-        mapped = title_map.get(mapped_cmd or normalized_cmd, "Results")
-        if mapped is not None:
-            return mapped
-
-        if emitted_items:
-            first = emitted_items[0]
-            try:
-                if isinstance(first, dict) and first.get("title"):
-                    return str(first.get("title"))
-                if hasattr(first, "title") and getattr(first, "title"):
-                    return str(getattr(first, "title"))
-            except Exception:
-                pass
-        return "Results"
-
-    def execute(self, cmd_name: str, args: List[str]) -> None:
-        from SYS import pipeline as ctx
-        from cmdlet import REGISTRY
-
-        # REPL guard: stage-local selection tables should not leak across independent
-        # commands. @ selection can always re-seed from the last result table.
-        try:
-            if hasattr(ctx, "set_current_stage_table"):
-                ctx.set_current_stage_table(None)
-        except Exception:
-            pass
-
-        cmd_fn = REGISTRY.get(cmd_name)
-        try:
-            mod = import_cmd_module(cmd_name, reload_loaded=True)
-            data = getattr(mod, "CMDLET", None) if mod else None
-            if data and hasattr(data, "exec") and callable(getattr(data, "exec")):
-                from SYS.cmdlet_spec import collect_registered_cmdlet_names
-
-                run_fn = getattr(data, "exec")
-                for registered_name in collect_registered_cmdlet_names(data, fallback_name=cmd_name):
-                    REGISTRY[registered_name] = run_fn
-                cmd_fn = run_fn
-        except Exception:
-            pass
-
-        if not cmd_fn:
-            # Lazy-import module and register its CMDLET.
-            try:
-                mod = import_cmd_module(cmd_name)
-                data = getattr(mod, "CMDLET", None) if mod else None
-                if data and hasattr(data, "exec") and callable(getattr(data, "exec")):
-                    run_fn = getattr(data, "exec")
-                    REGISTRY[cmd_name] = run_fn
-                    cmd_fn = run_fn
-            except Exception:
-                cmd_fn = None
-
-        if not cmd_fn:
-            print(f"Unknown command: {cmd_name}\n")
-            try:
-                ctx.set_last_execution_result(
-                    status="failed",
-                    error=f"Unknown command: {cmd_name}",
-                    command_text=" ".join([cmd_name, *args]).strip() or cmd_name,
-                )
-            except Exception:
-                pass
-            return
-
-        config = self._config_loader.load()
-
-        # ------------------------------------------------------------------
-        # Single-command Live pipeline progress (match REPL behavior)
-        # ------------------------------------------------------------------
-        progress_ui = None
-        pipe_idx: Optional[int] = None
-
-        def _maybe_start_single_live_progress(
-            *,
-            cmd_name_norm: str,
-            filtered_args: List[str],
-            piped_input: Any,
-            config: Any,
-        ) -> None:
-            nonlocal progress_ui, pipe_idx
-
-            effective_cmd = CmdletCompleter._effective_cmd_name(cmd_name_norm, filtered_args)
-
-            # Keep behavior consistent with pipeline runner exclusions.
-            # Some commands render their own Rich UI (tables/panels) and don't
-            # play nicely with Live cursor control.
-            if effective_cmd in {
-                    "get-relationship",
-                    "get-rel",
-                    ".pipe",
-                    ".mpv",
-                    ".matrix",
-                    ".telegram",
-                    "telegram",
-                    "delete-file",
-                    "del-file",
-                    ".help",
-                    "help",
-                    "?",
-                    ".config",
-                    ".status",
-                    ".table",
-                    ".worker",
-                    ".adjective",
-            }:
-                return
-
-            # add-file directory selector mode: show only the selection table, no Live progress.
-            if effective_cmd in {"add-file", "add_file"}:
-                try:
-                    from pathlib import Path as _Path
-
-                    toks = list(filtered_args or [])
-                    i = 0
-                    while i < len(toks):
-                        t = str(toks[i])
-                        low = t.lower().strip()
-                        if low in {"-path",
-                                   "--path",
-                                   "-p"} and i + 1 < len(toks):
-                            nxt = str(toks[i + 1])
-                            if nxt and ("," not in nxt):
-                                p = _Path(nxt)
-                                if p.exists() and p.is_dir():
-                                    return
-                            i += 2
-                            continue
-                        i += 1
-                except Exception:
-                    pass
-
-            try:
-                quiet_mode = (
-                    bool(config.get("_quiet_background_output"))
-                    if isinstance(config,
-                                  dict) else False
-                )
-            except Exception:
-                quiet_mode = False
-            if quiet_mode:
-                return
-
-            try:
-                import sys as _sys
-
-                if not bool(getattr(_sys.stderr, "isatty", lambda: False)()):
-                    return
-            except Exception:
-                return
-
-            try:
-                from SYS.models import PipelineLiveProgress
-
-                progress_ui = PipelineLiveProgress([cmd_name_norm], enabled=True)
-                progress_ui.start()
-                try:
-                    if hasattr(ctx, "set_live_progress"):
-                        ctx.set_live_progress(progress_ui)
-                except Exception:
-                    pass
-                try:
-                    progress_cb = (
-                        ctx.get_progress_event_callback()
-                        if hasattr(ctx, "get_progress_event_callback") else None
-                    )
-                    if callable(progress_cb) and hasattr(progress_ui, "set_event_callback"):
-                        progress_ui.set_event_callback(progress_cb)
-                except Exception:
-                    pass
-
-                pipe_idx = 0
-
-                # Estimate per-item task count for the single pipe.
-                total_items = 1
-                preview_items: Optional[List[Any]] = None
-                try:
-                    if isinstance(piped_input, list):
-                        total_items = max(1, int(len(piped_input)))
-                        preview_items = list(piped_input)
-                    elif piped_input is not None:
-                        total_items = 1
-                        preview_items = [piped_input]
-                    else:
-                        preview: List[Any] = []
-                        toks = list(filtered_args or [])
-                        i = 0
-                        while i < len(toks):
-                            t = str(toks[i])
-                            low = t.lower().strip()
-                            if (effective_cmd in {"add-file", "add_file"} and low in {"-path",
-                                                                          "--path",
-                                                                          "-p"}
-                                    and i + 1 < len(toks)):
-                                nxt = str(toks[i + 1])
-                                if nxt:
-                                    if "," in nxt:
-                                        parts = [
-                                            p.strip().strip("\"'")
-                                            for p in nxt.split(",")
-                                        ]
-                                        parts = [p for p in parts if p]
-                                        if parts:
-                                            preview.extend(parts)
-                                            i += 2
-                                            continue
-                                    else:
-                                        preview.append(nxt)
-                                        i += 2
-                                        continue
-                            if low in {"-url",
-                                       "--url"} and i + 1 < len(toks):
-                                nxt = str(toks[i + 1])
-                                if nxt and not nxt.startswith("-"):
-                                    preview.append(nxt)
-                                i += 2
-                                continue
-                            if (not t.startswith("-")) and ("://" in low
-                                                            or low.startswith(
-                                                                ("magnet:",
-                                                                 "torrent:"))):
-                                preview.append(t)
-                            i += 1
-                        preview_items = preview if preview else None
-                        total_items = max(1, int(len(preview)) if preview else 1)
-                except Exception:
-                    total_items = 1
-                    preview_items = None
-
-                try:
-                    progress_ui.begin_pipe(
-                        0,
-                        total_items=int(total_items),
-                        items_preview=preview_items
-                    )
-                except Exception:
-                    pass
-            except Exception:
-                progress_ui = None
-                pipe_idx = None
-
-        filtered_args: List[str] = []
-        selected_indices: List[int] = []
-        select_all = False
-        selection_filters: List[List[Tuple[str, str]]] = []
-
-        value_flags: Set[str] = set()
-        try:
-            meta = get_cmdlet_metadata(cmd_name)
-            raw = meta.get("raw") if isinstance(meta, dict) else None
-            arg_specs = getattr(raw, "arg", None) if raw is not None else None
-            if isinstance(arg_specs, list):
-                for spec in arg_specs:
-                    spec_type = str(getattr(spec,
-                                            "type",
-                                            "string") or "string").strip().lower()
-                    if spec_type == "flag":
-                        continue
-                    spec_name = str(getattr(spec, "name", "") or "")
-                    canonical = spec_name.lstrip("-").strip()
-                    if not canonical:
-                        continue
-                    value_flags.add(f"-{canonical}".lower())
-                    value_flags.add(f"--{canonical}".lower())
-                    alias = str(getattr(spec, "alias", "") or "").strip()
-                    if alias:
-                        value_flags.add(f"-{alias}".lower())
-        except Exception:
-            value_flags = set()
-
-        for i, arg in enumerate(args):
-            if isinstance(arg, str) and arg.startswith("@"):  # selection candidate
-                prev = str(args[i - 1]).lower() if i > 0 else ""
-                if prev in value_flags:
-                    filtered_args.append(arg)
-                    continue
-
-                # Universal selection filter: @"COL:expr" (quotes may be stripped by tokenization)
-                filter_spec = SelectionFilterSyntax.parse(arg)
-                if filter_spec is not None:
-                    selection_filters.append(filter_spec)
-                    continue
-
-                if arg.strip() == "@*":
-                    select_all = True
-                    continue
-
-                selection = SelectionSyntax.parse(arg)
-                if selection is not None:
-                    zero_based = [idx - 1 for idx in selection]
-                    for idx in zero_based:
-                        if idx not in selected_indices:
-                            selected_indices.append(idx)
-                    continue
-
-                filtered_args.append(arg)
-                continue
-
-            filtered_args.append(str(arg))
-
-        # IMPORTANT: Do not implicitly feed the previous command's results into
-        # a new command unless the user explicitly selected items via @ syntax.
-        # Piping should require `|` (or an explicit @ selection).
-        piped_items = ctx.get_last_result_items()
-        result: Any = None
-        effective_selected_indices: List[int] = []
-        if piped_items and (select_all or selected_indices or selection_filters):
-            candidate_idxs = list(range(len(piped_items)))
-            for spec in selection_filters:
-                candidate_idxs = [
-                    i for i in candidate_idxs
-                    if SelectionFilterSyntax.matches(piped_items[i], spec)
-                ]
-
-            if select_all:
-                effective_selected_indices = list(candidate_idxs)
-            elif selected_indices:
-                effective_selected_indices = [
-                    candidate_idxs[i] for i in selected_indices
-                    if 0 <= i < len(candidate_idxs)
-                ]
-            else:
-                effective_selected_indices = list(candidate_idxs)
-
-            result = [piped_items[i] for i in effective_selected_indices]
-
-        worker_manager = WorkerManagerRegistry.ensure(config)
-        stage_session = WorkerStages.begin_stage(
-            worker_manager,
-            cmd_name=cmd_name,
-            stage_tokens=[cmd_name,
-                          *filtered_args],
-            config=config,
-            command_text=" ".join([cmd_name,
-                                   *filtered_args]).strip() or cmd_name,
-        )
-
-        stage_worker_id = stage_session.worker_id if stage_session else None
-
-        # Start live progress after we know the effective cmd + args + piped input.
-        cmd_norm = str(cmd_name or "").replace("_", "-").strip().lower()
-        _maybe_start_single_live_progress(
-            cmd_name_norm=cmd_norm or str(cmd_name or "").strip().lower(),
-            filtered_args=filtered_args,
-            piped_input=result,
-            config=config,
-        )
-
-        on_emit = None
-        if progress_ui is not None and pipe_idx is not None:
-            _ui = progress_ui
-
-            def _on_emit(obj: Any, _progress=_ui) -> None:
-                try:
-                    _progress.on_emit(0, obj)
-                except Exception:
-                    pass
-
-            on_emit = _on_emit
-
-        pipeline_ctx = ctx.PipelineStageContext(
-            stage_index=0,
-            total_stages=1,
-            pipe_index=pipe_idx if pipe_idx is not None else 0,
-            worker_id=stage_worker_id,
-            on_emit=on_emit,
-        )
-        ctx.set_stage_context(pipeline_ctx)
-        stage_status = "completed"
-        stage_error = ""
-
-        ctx.set_last_selection(effective_selected_indices)
-        try:
-            try:
-                if hasattr(ctx, "set_current_cmdlet_name"):
-                    ctx.set_current_cmdlet_name(cmd_name)
-            except Exception:
-                pass
-
-            try:
-                if hasattr(ctx, "set_current_stage_text"):
-                    raw_stage = ""
-                    try:
-                        raw_stage = (
-                            ctx.get_current_command_text("")
-                            if hasattr(ctx,
-                                       "get_current_command_text") else ""
-                        )
-                    except Exception:
-                        raw_stage = ""
-                    if raw_stage:
-                        ctx.set_current_stage_text(raw_stage)
-                    else:
-                        ctx.set_current_stage_text(
-                            " ".join([cmd_name,
-                                      *filtered_args]).strip() or cmd_name
-                        )
-            except Exception:
-                pass
-
-            ret_code = cmd_fn(result, filtered_args, config)
-
-            if getattr(pipeline_ctx, "emits", None):
-                emits = list(pipeline_ctx.emits)
-
-                # Shared `-path` behavior: if the cmdlet emitted temp/PATH file artifacts,
-                # move them to the user-specified destination and update emitted paths.
-                try:
-                    from cmdlet import _shared as sh
-
-                    emits = sh.apply_output_path_from_pipeobjects(
-                        cmd_name=cmd_name,
-                        args=filtered_args,
-                        emits=emits
-                    )
-                    try:
-                        pipeline_ctx.emits = list(emits)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-
-                # Detect format-selection emits and skip printing (user selects with @N).
-                is_format_selection = False
-                if emits:
-                    first_emit = emits[0]
-                    if isinstance(first_emit, dict) and "format_id" in first_emit:
-                        is_format_selection = True
-
-                if is_format_selection:
-                    ctx.set_last_result_items_only(emits)
-                else:
-                    table_title = self._get_table_title_for_command(
-                        cmd_name,
-                        emits,
-                        filtered_args
-                    )
-
-                    effective_cmd = CmdletCompleter._effective_cmd_name(cmd_name, filtered_args)
-
-                    selectable_commands = {
-                        "search-file",
-                        "download-data",
-                        "download-file",
-                        "search_file",
-                        "download_data",
-                        "download_file",
-                        ".config",
-                        ".worker",
-                    }
-                    display_only_commands = {
-                        "get-url",
-                        "get_url",
-                        "get-note",
-                        "get_note",
-                        "get-relationship",
-                        "get_relationship",
-                        "get-metadata",
-                        "get_metadata",
-                    }
-                    self_managing_commands = {
-                        "tag",
-                        "tags",
-                        "get-metadata",
-                        "get_metadata",
-                        "get-url",
-                        "get_url",
-                        "search-file",
-                        "search_file",
-                        "add-file",
-                        "add_file",
-                        "screen-shot",
-                        "screenshot",
-                        "file",
-                    }
-
-                    if effective_cmd in self_managing_commands:
-                        table = (
-                            ctx.get_display_table()
-                            if hasattr(ctx, "get_display_table") else None
-                        )
-                        if table is None:
-                            table = ctx.get_last_result_table()
-                        if table is None:
-                            table = Table(table_title)
-                            for emitted in emits:
-                                table.add_result(emitted)
-                    else:
-                        table = Table(table_title)
-                        for emitted in emits:
-                            table.add_result(emitted)
-
-                        if effective_cmd in selectable_commands:
-                            table.set_source_command(effective_cmd, filtered_args)
-                            ctx.set_last_result_table(table, emits)
-                            ctx.set_current_stage_table(None)
-                        elif effective_cmd in display_only_commands or cmd_name in display_only_commands:
-                            ctx.set_last_result_items_only(emits)
-                        else:
-                            ctx.set_last_result_items_only(emits)
-
-                    # Stop Live progress before printing tables.
-                    if progress_ui is not None:
-                        try:
-                            if pipe_idx is not None:
-                                progress_ui.finish_pipe(
-                                    int(pipe_idx),
-                                    force_complete=(stage_status == "completed")
-                                )
-                        except Exception:
-                            pass
-                        try:
-                            progress_ui.complete_all_pipes()
-                        except Exception:
-                            pass
-                        try:
-                            progress_ui.stop()
-                        except Exception:
-                            pass
-                        try:
-                            if hasattr(ctx, "set_live_progress"):
-                                ctx.set_live_progress(None)
-                        except Exception:
-                            pass
-                        progress_ui = None
-                        pipe_idx = None
-
-                    if not getattr(table, "_rendered_by_cmdlet", False):
-                        stdout_console().print()
-                        stdout_console().print(table)
-
-            # If the cmdlet produced a current-stage table without emits (e.g. format selection),
-            # render it here for parity with REPL pipeline runner.
-            if (not getattr(pipeline_ctx,
-                            "emits",
-                            None)) and hasattr(ctx,
-                                               "get_current_stage_table"):
-                try:
-                    stage_table = ctx.get_current_stage_table()
-                except Exception:
-                    stage_table = None
-                if stage_table is not None:
-                    try:
-                        already_rendered = bool(
-                            getattr(stage_table,
-                                    "_rendered_by_cmdlet",
-                                    False)
-                        )
-                    except Exception:
-                        already_rendered = False
-
-                    if already_rendered:
-                        if progress_ui is not None:
-                            try:
-                                if pipe_idx is not None:
-                                    progress_ui.finish_pipe(
-                                        int(pipe_idx),
-                                        force_complete=(stage_status == "completed"),
-                                    )
-                            except Exception:
-                                pass
-                            try:
-                                progress_ui.complete_all_pipes()
-                            except Exception:
-                                pass
-                            try:
-                                progress_ui.stop()
-                            except Exception:
-                                pass
-                            try:
-                                if hasattr(ctx, "set_live_progress"):
-                                    ctx.set_live_progress(None)
-                            except Exception:
-                                pass
-                            progress_ui = None
-                            pipe_idx = None
-                        try:
-                            ctx.set_last_execution_result(
-                                status=stage_status,
-                                error=stage_error,
-                                command_text=" ".join([cmd_name, *filtered_args]).strip() or cmd_name,
-                            )
-                        except Exception:
-                            pass
-                        return
-
-                    if progress_ui is not None:
-                        try:
-                            if pipe_idx is not None:
-                                progress_ui.finish_pipe(
-                                    int(pipe_idx),
-                                    force_complete=(stage_status == "completed")
-                                )
-                        except Exception:
-                            pass
-                        try:
-                            progress_ui.complete_all_pipes()
-                        except Exception:
-                            pass
-                        try:
-                            progress_ui.stop()
-                        except Exception:
-                            pass
-                        try:
-                            if hasattr(ctx, "set_live_progress"):
-                                ctx.set_live_progress(None)
-                        except Exception:
-                            pass
-                        progress_ui = None
-                        pipe_idx = None
-                    stdout_console().print()
-                    stdout_console().print(stage_table)
-
-            if ret_code != 0:
-                stage_status = "failed"
-                stage_error = f"exit code {ret_code}"
-                # No print here - we want to keep output clean and avoid redundant "exit code" notices.
-        except Exception as exc:
-            stage_status = "failed"
-            stage_error = f"{type(exc).__name__}: {exc}"
-            print(f"[error] {type(exc).__name__}: {exc}\n")
-        finally:
-            if progress_ui is not None:
-                try:
-                    if pipe_idx is not None:
-                        progress_ui.finish_pipe(
-                            int(pipe_idx),
-                            force_complete=(stage_status == "completed")
-                        )
-                except Exception:
-                    pass
-                try:
-                    progress_ui.complete_all_pipes()
-                except Exception:
-                    pass
-                try:
-                    progress_ui.stop()
-                except Exception:
-                    pass
-                try:
-                    if hasattr(ctx, "set_live_progress"):
-                        ctx.set_live_progress(None)
-                except Exception:
-                    pass
-            # Do not keep stage tables around after a single command; it can cause
-            # later @ selections to bind to stale tables (e.g. old add-file scans).
-            try:
-                if hasattr(ctx, "set_last_execution_result"):
-                    ctx.set_last_execution_result(
-                        status=stage_status,
-                        error=stage_error,
-                        command_text=" ".join([cmd_name, *filtered_args]).strip() or cmd_name,
-                    )
-            except Exception:
-                pass
-            try:
-                if hasattr(ctx, "set_current_stage_table"):
-                    ctx.set_current_stage_table(None)
-            except Exception:
-                pass
-            try:
-                if hasattr(ctx, "clear_current_cmdlet_name"):
-                    ctx.clear_current_cmdlet_name()
-            except Exception:
-                pass
-            try:
-                if hasattr(ctx, "clear_current_stage_text"):
-                    ctx.clear_current_stage_text()
-            except Exception:
-                pass
-            ctx.clear_last_selection()
-            if stage_session:
-                stage_session.close(status=stage_status, error_msg=stage_error)
-
-
-
 console = Console()
 
 
@@ -1239,8 +342,13 @@ class CLI:
         except Exception:
             pass
 
-        self._cmdlet_executor = CmdletExecutor(config_loader=self._config_loader)
         self._pipeline_executor = PipelineExecutor(config_loader=self._config_loader)
+
+    def _run_tokens(self, tokens: List[str], *, exit_on_error: bool = False) -> int:
+        code = int(self._pipeline_executor.execute_tokens(list(tokens)) or 0)
+        if exit_on_error and code:
+            raise typer.Exit(code=code)
+        return code
 
     @staticmethod
     def parse_selection_syntax(token: str) -> Optional[List[int]]:
@@ -1298,8 +406,8 @@ class CLI:
                         seeds = [seeds]
                     ctx.set_last_result_items_only(seeds)
                 except Exception as exc:
-                    print(f"Error parsing seeds JSON: {exc}")
-                    return
+                    print(f"Error parsing seeds JSON: {exc}", file=sys.stderr)
+                    raise typer.Exit(code=1)
 
             try:
                 from SYS.cli_syntax import validate_pipeline_text
@@ -1307,7 +415,9 @@ class CLI:
                 syntax_error = validate_pipeline_text(command, config=config)
                 if syntax_error:
                     print(syntax_error.message, file=sys.stderr)
-                    return
+                    raise typer.Exit(code=1)
+            except typer.Exit:
+                raise
             except Exception:
                 pass
 
@@ -1317,11 +427,11 @@ class CLI:
                 tokens = split_shell_tokens(command)
             except ValueError as exc:
                 print(f"Syntax error: {exc}", file=sys.stderr)
-                return
+                raise typer.Exit(code=1)
 
             if not tokens:
-                return
-            self._pipeline_executor.execute_tokens(tokens)
+                raise typer.Exit(code=1)
+            self._run_tokens(tokens, exit_on_error=True)
 
         @app.command("repl")
         def repl() -> None:
@@ -1360,7 +470,7 @@ class CLI:
                             args = list(ctx.args or [])
                         except Exception:
                             args = []
-                        self._cmdlet_executor.execute(cmd_name, args)
+                        self._run_tokens([cmd_name, *args], exit_on_error=True)
 
                     return _handler
 
@@ -1372,7 +482,12 @@ class CLI:
         return app
 
     def run(self) -> None:
-        # Ensure Rich tracebacks are active even when invoking subcommands.
+        try:
+            from SYS.env_check import apply_debug_from_config
+
+            apply_debug_from_config(self.ROOT / "medios.db")
+        except Exception:
+            pass
         try:
             config = self._config_loader.load()
             debug_enabled = bool(config.get("debug",
@@ -1752,7 +867,7 @@ class CLI:
                     break
                 if low in {"help",
                            "?"}:
-                    self._cmdlet_executor.execute(".help", [])
+                    self._run_tokens([".help"])
                     continue
 
                 pipeline_ctx_ref = None
@@ -1925,9 +1040,8 @@ class CLI:
                                         except Exception:
                                             pass
                                     try:
-                                        self._cmdlet_executor.execute(
-                                            "search-file",
-                                            cleaned_args + ["--refresh"]
+                                        self._run_tokens(
+                                            ["search-file", *cleaned_args, "--refresh"]
                                         )
                                     finally:
                                         if hasattr(ctx, "clear_current_command_text"):
@@ -1962,24 +1076,18 @@ class CLI:
                     continue
 
                 try:
-                    if "|" in tokens or (tokens and tokens[0].startswith("@")):
-                        self._pipeline_executor.execute_tokens(tokens)
-                    else:
+                    if not ("|" in tokens or (tokens and tokens[0].startswith("@"))):
                         if pipeline_ctx_ref is not None:
                             try:
                                 pipeline_ctx_ref.clear_pending_pipeline_tail()
                             except Exception:
                                 pass
                         cmd_name = tokens[0].replace("_", "-").lower()
-                        is_help = any(
-                            arg in {"-help",
-                                    "--help",
-                                    "-h"} for arg in tokens[1:]
-                        )
-                        if is_help:
-                            self._cmdlet_executor.execute(".help", [cmd_name])
+                        if any(arg in {"-help", "--help", "-h"} for arg in tokens[1:]):
+                            tokens = [".help", cmd_name]
                         else:
-                            self._cmdlet_executor.execute(cmd_name, tokens[1:])
+                            tokens = [cmd_name, *tokens[1:]]
+                    self._run_tokens(tokens)
                 finally:
                     if pipeline_ctx_ref and hasattr(pipeline_ctx_ref, "get_last_execution_result"):
                         try:

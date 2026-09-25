@@ -280,8 +280,24 @@ class Database:
                 return cursor.fetchone()
             finally:
                 cursor.close()
-# Singleton instance
-db = Database()
+class _LazyDatabase:
+    """Open SQLite on first use instead of at import."""
+
+    def __init__(self) -> None:
+        self._instance: Optional[Database] = None
+
+    def _db(self) -> Database:
+        instance = self._instance
+        if instance is None:
+            instance = Database()
+            self._instance = instance
+        return instance
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._db(), name)
+
+
+db = _LazyDatabase()
 
 _LOG_QUEUE: Queue = Queue()
 _LOG_THREAD_STARTED = False
@@ -324,13 +340,11 @@ def _ensure_log_db_schema() -> None:
         pass
 
 
-_ensure_log_db_schema()
-
-
 def _log_worker_loop() -> None:
     """Background log writer using a temporary per-write connection with
     small retry/backoff and a file fallback when writes fail repeatedly.
     """
+    _ensure_log_db_schema()
     global _LOG_WRITE_COUNT
     while True:
         item = _LOG_QUEUE.get()

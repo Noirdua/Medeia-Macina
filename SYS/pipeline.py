@@ -1,12 +1,8 @@
-"""
-Re-export module for backward compatibility.
+"""Public pipeline facade.
 
-@deprecated: Prefer direct imports from SYS.pipeline_state or SYS.pipeline_executor.
-  - from SYS.pipeline_state import PipelineState, get_pipeline_state, ...
-  - from SYS.pipeline_executor import PipelineExecutor
-
-This module re-exports all names from both submodules so existing code
-that imports from SYS.pipeline continues to work unchanged.
+Callers should use ``from SYS import pipeline as ctx``. The implementation
+lives in pipeline_state and pipeline_executor; this module is the import
+surface, not a second runtime.
 """
 from SYS.pipeline_state import __all__ as _state_all
 from SYS.pipeline_state import *  # noqa: F401, F403

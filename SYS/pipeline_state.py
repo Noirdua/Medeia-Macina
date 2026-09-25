@@ -249,12 +249,14 @@ class PipelineState:
 # ---------------------------------------------------------------------------
 
 _CTX_STATE: ContextVar[Optional[PipelineState]] = ContextVar("_pipeline_state", default=None)
-_GLOBAL_STATE: PipelineState = PipelineState()
 
 
 def _get_pipeline_state() -> PipelineState:
     state = _CTX_STATE.get()
-    return state if state is not None else _GLOBAL_STATE
+    if state is None:
+        state = PipelineState()
+        _CTX_STATE.set(state)
+    return state
 
 
 @contextmanager
@@ -559,45 +561,9 @@ def clear_current_command_text() -> None:
 
 
 def split_pipeline_text(pipeline_text: str) -> List[str]:
-    text = str(pipeline_text or "")
-    if not text:
-        return []
+    from SYS.cli_syntax import split_pipeline_stages
 
-    stages: List[str] = []
-    buf: List[str] = []
-    quote: Optional[str] = None
-    escape = False
-
-    for ch in text:
-        if escape:
-            buf.append(ch)
-            escape = False
-            continue
-
-        if ch == "\\" and quote is not None:
-            buf.append(ch)
-            escape = True
-            continue
-
-        if ch in ('"', "'"):
-            if quote is None:
-                quote = ch
-            elif quote == ch:
-                quote = None
-            buf.append(ch)
-            continue
-
-        if ch == "|" and quote is None:
-            stages.append("".join(buf).strip())
-            buf = []
-            continue
-
-        buf.append(ch)
-
-    tail = "".join(buf).strip()
-    if tail:
-        stages.append(tail)
-    return [s for s in stages if s]
+    return split_pipeline_stages(pipeline_text)
 
 
 def get_current_command_stages() -> List[str]:
@@ -1323,18 +1289,9 @@ def clear_last_result() -> None:
 
 
 def _split_pipeline_tokens(tokens: Sequence[str]) -> List[List[str]]:
-    stages: List[List[str]] = []
-    current: List[str] = []
-    for token in tokens:
-        if token == "|":
-            if current:
-                stages.append(current)
-                current = []
-            continue
-        current.append(str(token))
-    if current:
-        stages.append(current)
-    return [stage for stage in stages if stage]
+    from SYS.cli_syntax import split_pipeline_tokens
+
+    return split_pipeline_tokens(tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -1346,7 +1303,6 @@ __all__ = [
     "PipelineState",
     # ContextVar and factories
     "_CTX_STATE",
-    "_GLOBAL_STATE",
     "_get_pipeline_state",
     "get_pipeline_state",
     "new_pipeline_state",

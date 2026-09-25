@@ -47,7 +47,7 @@ def _rich():
 
 
 # Reuse the existing format_bytes helper under a clearer alias
-from SYS.utils import format_bytes as format_mb
+from SYS.utils import format_bytes
 
 import logging
 logger = logging.getLogger(__name__)
@@ -1261,19 +1261,30 @@ class Table:
         row = self.add_row()
         row.payload = result
 
-        # Handle TagItem from get_tag.py (tag display with index)
-        if hasattr(result, "__class__") and result.__class__.__name__ == "TagItem":
+        tag_item_type = None
+        search_result_type = None
+        pipe_object_type = None
+        try:
+            from cmdlet.metadata.tag_get import TagItem as tag_item_type
+        except Exception:
+            tag_item_type = None
+        try:
+            from PluginCore.base import SearchResult as search_result_type
+        except Exception:
+            search_result_type = None
+        try:
+            from SYS.models import PipeObject as pipe_object_type
+        except Exception:
+            pipe_object_type = None
+
+        if tag_item_type is not None and isinstance(result, tag_item_type):
             self._add_tag_item(row, result)
-        # Handle ResultItem from search_file.py (compact display)
-        elif hasattr(result, "__class__") and result.__class__.__name__ == "ResultItem":
-            self._add_result_item(row, result)
-        # Handle SearchResult from search_file.py
-        elif hasattr(result,
-                     "__class__") and result.__class__.__name__ == "SearchResult":
+        elif search_result_type is not None and isinstance(result, search_result_type):
             self._add_search_result(row, result)
-        # Handle PipeObject from models.py
-        elif hasattr(result, "__class__") and result.__class__.__name__ == "PipeObject":
+        elif pipe_object_type is not None and isinstance(result, pipe_object_type):
             self._add_pipe_object(row, result)
+        elif getattr(getattr(result, "__class__", None), "__name__", "") == "ResultItem":
+            self._add_result_item(row, result)
         # Handle dict
         elif isinstance(result, dict):
             self._add_dict(row, result)
@@ -2450,7 +2461,7 @@ def extract_item_metadata(item: Any) -> Dict[str, Any]:
      
     size = extract_size_bytes_value(item)
     if size is not None:
-        out["Size"] = format_mb(size)
+        out["Size"] = format_bytes(size)
     else:
         s = data.get("size") or data.get("size_bytes")
         if s is not None:

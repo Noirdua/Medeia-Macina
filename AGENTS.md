@@ -27,9 +27,9 @@ Startup chrome is loadable from `design/`: `mm.md` (`[mm]` launcher prefix), `ka
 | `scripts/hydrusnetwork.py` | Hydrus **clone/venv/deps**; imports helpers from `run_client.py` |
 | `cmdlet/` | User commands (`file -search`, `file -add`, metadata cmdlets) |
 | `cmdlet/file/` | File actions split by concern (`search.py`, `download_core.py`, `add_*.py`) |
-| `cmdnat/` | Native/internal commands (`.config`, status); `_parsing.py` re-exports `SYS.command_parsing` |
+| `cmdnat/` | Native/internal commands (`.config`, status); arg parsing is `SYS.command_parsing` |
 | `PluginCore/` | Plugin load, `Provider`/`SearchResult`, `BackendRegistry` |
-| `plugins/<name>/` | One plugin per folder; optional `api/`, `store_proxy.py`, `store_backend.py` |
+| `plugins/<name>/` | One plugin per folder; optional `api/`, `store_backend.py` |
 | `SYS/` | Config, SQLite, result tables, pipeline, logging, utils |
 | `API/` | HTTP: `HTTP.py` (`HTTPClient`), `httpx_shared.py` (pooled clients), `requests_client.py` |
 | `tests/` | Pytest files named `test_*.py`. **Gitignored** by `.gitignore` `test*` — they exist on disk but are **not shipped** unless force-added. Run with `python -m pytest tests/... -o addopts=` to skip coverage defaults. |
@@ -62,12 +62,11 @@ Three layers — do not add a fourth:
 
 | Layer | File | Job |
 |---|---|---|
-| Plugin | `plugins/hydrusnetwork/__init__.py` | Search, instance resolve, `__getattr__` forwards storage to the operations backend |
-| Proxy | `plugins/hydrusnetwork/store_proxy.py` | `BackendBase` for `BackendRegistry`; lazy `_operations()` |
-| Operations | `plugins/hydrusnetwork/store_backend.py` | Real API work |
+| Plugin | `plugins/hydrusnetwork/__init__.py` | Search and instance resolve; storage methods call the operations backend |
+| Operations | `plugins/hydrusnetwork/store_backend.py` | `HydrusStoreOperations(BackendBase)`; real API work |
 | Client | `plugins/hydrusnetwork/api/__init__.py` | HTTP/CBOR to Hydrus Client API |
 
-- **File uploads** (`add_file`) use `http.client` with explicit `Content-Length` (`_put_raw_file`), not httpx streaming. Caddy + chunked bodies made Hydrus return `Unknown filetype!`.
+- **File uploads** (`add_file`) use `API.HTTP.upload_with_content_length` (explicit `Content-Length`, not httpx streaming). Caddy + chunked bodies made Hydrus return `Unknown filetype!`. Hydrus passes `verify_ssl=False` because local clients use that policy.
 - Hydrus HTTP for JSON/GET uses `HTTPClient(..., trust_env=False)` so `HTTP(S)_PROXY` does not wrap API calls.
 - Hydrus metadata for cmdlets: `hydrus_provider.fetch_metadata` / `get_title`. Payload-style helper in `plugins.hydrusnetwork.api` is `_fetch_hydrus_metadata_payload` (internal).
 - Headless client: `QT_QPA_PLATFORM=offscreen` via `python3 run_client.py --headless`. Venv may be `.venv` **or** `venv`; `find_venv_python` checks both.

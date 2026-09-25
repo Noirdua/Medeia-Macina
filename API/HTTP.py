@@ -956,3 +956,85 @@ def download_direct_file(
                 },
             )
         raise DownloadError(f"Error downloading file: {exc}") from exc
+
+
+def upload_with_content_length(
+    *,
+    method: str,
+    url: str,
+    headers: Dict[str, str],
+    file_path: Path,
+    file_size: int,
+    timeout: float,
+    on_progress: Optional[Callable[..., Any]] = None,
+    chunk_size: int = 1024 * 1024,
+    verify_ssl: bool = True,
+) -> tuple[int, str, bytes, str]:
+    """POST or PUT a file with an explicit Content-Length.
+
+    httpx streaming uploads become chunked bodies. Hydrus rejects those as
+    unknown filetypes, so this path uses http.client and the caller's verify
+    policy instead of a private client.
+    """
+    import http.client
+    import ssl
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(url)
+    host = parsed.hostname or ""
+    port = parsed.port
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    connection_cls = (
+        http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    )
+    conn_kwargs: Dict[str, Any] = {"timeout": timeout}
+    if parsed.scheme == "https":
+        conn_kwargs["context"] = (
+            ssl.create_default_context() if verify_ssl else ssl._create_unverified_context()
+        )
+    connection = connection_cls(host, port, **conn_kwargs)
+    sent = 0
+    try:
+        connection.putrequest(method or "POST", path, skip_host=True, skip_accept_encoding=True)
+        host_header = host
+        if (parsed.scheme == "http" and port not in (80, None)) or (
+            parsed.scheme == "https" and port not in (443, None)
+        ):
+            host_header = f"{host}:{port}"
+        connection.putheader("Host", host_header)
+        connection.putheader("Connection", "close")
+        for key, value in headers.items():
+            if not value or key.lower() in {"host", "transfer-encoding", "connection"}:
+                continue
+            connection.putheader(key, value)
+        if "content-length" not in {str(key).lower() for key in headers}:
+            connection.putheader("Content-Length", str(int(file_size)))
+        connection.endheaders()
+        with file_path.open("rb") as handle:
+            while True:
+                chunk = handle.read(max(1, int(chunk_size)))
+                if not chunk:
+                    break
+                connection.send(chunk)
+                sent += len(chunk)
+                if on_progress is not None:
+                    try:
+                        on_progress(sent, final=False)
+                    except Exception:
+                        logger.exception("Upload progress callback failed")
+        if on_progress is not None:
+            try:
+                on_progress(sent, final=True)
+            except Exception:
+                logger.exception("Upload progress callback failed")
+        response = connection.getresponse()
+        body = response.read() or b""
+        content_type = response.getheader("Content-Type", "") or ""
+        return int(response.status), str(response.reason or ""), body, content_type
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            logger.exception("Failed to close content-length upload connection")

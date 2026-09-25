@@ -59,18 +59,9 @@ class PipelineExecutor:
 
     @staticmethod
     def _split_stages(tokens: Sequence[str]) -> List[List[str]]:
-        stages: List[List[str]] = []
-        current: List[str] = []
-        for token in tokens:
-            if token == "|":
-                if current:
-                    stages.append(current)
-                    current = []
-            else:
-                current.append(token)
-        if current:
-            stages.append(current)
-        return stages
+        from SYS.cli_syntax import split_pipeline_tokens
+
+        return split_pipeline_tokens(tokens)
 
     @staticmethod
     def _stage_file_action(stage_tokens: Sequence[Any]) -> Optional[str]:
@@ -427,36 +418,104 @@ class PipelineExecutor:
         return config
 
     @staticmethod
+    def _value_flags_for_command(cmd_name: str) -> set[str]:
+        flags: set[str] = set()
+        try:
+            from SYS.cmdlet_catalog import get_cmdlet_metadata
+
+            meta = get_cmdlet_metadata(cmd_name)
+            raw = meta.get("raw") if isinstance(meta, dict) else None
+            arg_specs = getattr(raw, "arg", None) if raw is not None else None
+            if not isinstance(arg_specs, list):
+                return flags
+            for spec in arg_specs:
+                if str(getattr(spec, "type", "string") or "string").strip().lower() == "flag":
+                    continue
+                canonical = str(getattr(spec, "name", "") or "").lstrip("-").strip()
+                if not canonical:
+                    continue
+                flags.add(f"-{canonical}".lower())
+                flags.add(f"--{canonical}".lower())
+                alias = str(getattr(spec, "alias", "") or "").strip()
+                if alias:
+                    flags.add(f"-{alias}".lower())
+        except Exception:
+            return flags
+        return flags
+
+    @staticmethod
+    def _apply_inline_filters(
+        ctx: Any,
+        indices: List[int],
+        filters: List[Any],
+        select_all: bool,
+    ) -> List[int]:
+        if not filters:
+            return indices
+        try:
+            items = list(ctx.get_last_result_items() or [])
+        except Exception:
+            items = []
+        candidate = list(range(len(items)))
+        for spec in filters:
+            candidate = [
+                i
+                for i in candidate
+                if _cli_parsing().SelectionFilterSyntax.matches(items[i], spec)
+            ]
+        if select_all or not indices:
+            return candidate
+        return [candidate[i] for i in indices if 0 <= i < len(candidate)]
+
+    @staticmethod
     def _extract_first_stage_selection_tokens(
         stages: List[List[str]],
-    ) -> tuple[List[List[str]], List[int], bool, bool]:
+    ) -> tuple[List[List[str]], List[int], bool, bool, List[Any]]:
         first_stage_tokens = stages[0] if stages else []
         first_stage_selection_indices: List[int] = []
         first_stage_had_extra_args = False
         first_stage_select_all = False
+        filters: List[Any] = []
 
         if first_stage_tokens:
+            cmd_token = next(
+                (str(token) for token in first_stage_tokens if not str(token).startswith("@")),
+                "",
+            )
+            value_flags = (
+                PipelineExecutor._value_flags_for_command(cmd_token) if cmd_token else set()
+            )
             new_first_stage: List[str] = []
+            prev = ""
             for token in first_stage_tokens:
-                if token.startswith("@"):
+                if str(token).startswith("@") and prev.lower() not in value_flags:
+                    filter_spec = _cli_parsing().SelectionFilterSyntax.parse(token)
+                    if filter_spec is not None:
+                        filters.append(filter_spec)
+                        prev = str(token)
+                        continue
                     selection = _cli_parsing().SelectionSyntax.parse(token)
                     if selection is not None:
                         for idx in selection:
                             zero = idx - 1
                             if zero not in first_stage_selection_indices:
                                 first_stage_selection_indices.append(zero)
+                        prev = str(token)
                         continue
                     if token == "@*":
                         first_stage_select_all = True
+                        prev = str(token)
                         continue
                 new_first_stage.append(token)
+                prev = str(token)
 
+            selected = bool(first_stage_selection_indices or first_stage_select_all or filters)
             if new_first_stage:
                 stages = list(stages)
                 stages[0] = new_first_stage
-                if first_stage_selection_indices or first_stage_select_all:
+                if selected:
                     first_stage_had_extra_args = True
-            elif first_stage_selection_indices or first_stage_select_all:
+            elif selected:
                 stages = list(stages)
                 stages.pop(0)
 
@@ -465,6 +524,7 @@ class PipelineExecutor:
             first_stage_selection_indices,
             first_stage_had_extra_args,
             first_stage_select_all,
+            filters,
         )
 
     @staticmethod
@@ -1754,6 +1814,8 @@ class PipelineExecutor:
                         ".table",
                         ".worker",
                         ".adjective",
+                        ".telegram",
+                        "telegram",
                     }:
                         continue
                     if (
@@ -1799,7 +1861,11 @@ class PipelineExecutor:
     # Main execution entry point
     # -------------------------------------------------------------------
 
-    def execute_tokens(self, tokens: List[str]) -> None:
+    @staticmethod
+    def _exit_code(status: str) -> int:
+        return 0 if status in {"completed", "paused_selection"} else 1
+
+    def execute_tokens(self, tokens: List[str]) -> int:
         from cmdlet import REGISTRY
 
         from SYS import pipeline_state as ctx
@@ -1845,7 +1911,9 @@ class PipelineExecutor:
             stages = self._split_stages(tokens)
             if not stages:
                 log("Invalid pipeline syntax", file=sys.stderr)
-                return
+                pipeline_status = "failed"
+                pipeline_error = "Invalid pipeline syntax"
+                return self._exit_code(pipeline_status)
             self._maybe_seed_current_stage_table(ctx)
             stages = self._maybe_apply_pending_pipeline_tail(ctx, stages)
             config = self._load_config()
@@ -1856,9 +1924,16 @@ class PipelineExecutor:
                 first_stage_selection_indices,
                 first_stage_had_extra_args,
                 first_stage_select_all,
+                first_stage_filters,
             ) = self._extract_first_stage_selection_tokens(stages)
             first_stage_selection_indices = self._apply_select_all_if_requested(
                 ctx, first_stage_selection_indices, first_stage_select_all
+            )
+            first_stage_selection_indices = self._apply_inline_filters(
+                ctx,
+                first_stage_selection_indices,
+                first_stage_filters,
+                first_stage_select_all,
             )
 
             preflight_error = self._preflight_pipeline_stages(stages)
@@ -1866,12 +1941,12 @@ class PipelineExecutor:
                 log(preflight_error, file=sys.stderr)
                 pipeline_status = "failed"
                 pipeline_error = preflight_error
-                return
+                return self._exit_code(pipeline_status)
 
             if not self._validate_download_file_relationship_order(stages):
                 pipeline_status = "failed"
                 pipeline_error = "Invalid pipeline order"
-                return
+                return self._exit_code(pipeline_status)
 
             piped_result: Any = None
             worker_manager = _worker().WorkerManagerRegistry.ensure(config)
@@ -1901,7 +1976,10 @@ class PipelineExecutor:
                 pipeline_session=pipeline_session,
             )
             if not ok:
-                return
+                pipeline_status = "failed"
+                if not pipeline_error:
+                    pipeline_error = "Selection failed"
+                return self._exit_code(pipeline_status)
             if initial_piped is not None:
                 piped_result = initial_piped
 
@@ -1913,7 +1991,7 @@ class PipelineExecutor:
 
                 if maybe_publish_pipeline_instance_chooser(stages, config):
                     pipeline_status = "paused_selection"
-                    return
+                    return self._exit_code(pipeline_status)
                 store_pipeline_target_instances(stages)
             except Exception:
                 logger.exception("Failed pipeline instance chooser before stages")
@@ -2059,7 +2137,7 @@ class PipelineExecutor:
                         log("No current result table. Run a search first, then @N.", file=sys.stderr)
                         pipeline_status = "failed"
                         pipeline_error = "No result items/subject for @"
-                        return
+                        return self._exit_code(pipeline_status)
                     piped_result = subject
                     try:
                         subject_items = (
@@ -2104,7 +2182,7 @@ class PipelineExecutor:
                         log(f"Invalid selection: {selection_token}", file=sys.stderr)
                         pipeline_status = "failed"
                         pipeline_error = f"Invalid selection {selection_token}"
-                        return
+                        return self._exit_code(pipeline_status)
 
                     selected_indices: List[int] = []
                     display_table = None
@@ -2222,7 +2300,7 @@ class PipelineExecutor:
                         )
                         pipeline_status = "failed"
                         pipeline_error = "Empty selection"
-                        return
+                        return self._exit_code(pipeline_status)
 
                     stage_is_last = stage_index + 1 >= len(stages)
                     if filter_spec is not None and stage_is_last:
@@ -2335,7 +2413,7 @@ class PipelineExecutor:
                         filtered,
                         stage_is_last=(stage_index + 1 >= len(stages)),
                     ):
-                        return
+                        return self._exit_code(pipeline_status)
 
                     next_cmd: Optional[str] = None
                     next_args: List[str] = []
@@ -2497,48 +2575,14 @@ class PipelineExecutor:
                                     )
                     continue
 
-                cmd_fn = REGISTRY.get(cmd_name)
-                try:
-                    mod = import_cmd_module(cmd_name, reload_loaded=True)
-                    data = getattr(mod, "CMDLET", None) if mod else None
-                    if (
-                        data
-                        and hasattr(data, "exec")
-                        and callable(getattr(data, "exec"))
-                    ):
-                        from SYS.cmdlet_spec import (
-                            collect_registered_cmdlet_names,
-                        )
+                from cmdlet import resolve_cmdlet
 
-                        run_fn = getattr(data, "exec")
-                        for registered_name in collect_registered_cmdlet_names(
-                            data, fallback_name=cmd_name
-                        ):
-                            REGISTRY[registered_name] = run_fn
-                        cmd_fn = run_fn
-                except Exception:
-                    pass
-
-                if not cmd_fn:
-                    try:
-                        mod = import_cmd_module(cmd_name)
-                        data = getattr(mod, "CMDLET", None) if mod else None
-                        if (
-                            data
-                            and hasattr(data, "exec")
-                            and callable(getattr(data, "exec"))
-                        ):
-                            run_fn = getattr(data, "exec")
-                            REGISTRY[cmd_name] = run_fn
-                            cmd_fn = run_fn
-                    except Exception:
-                        cmd_fn = None
-
+                cmd_fn = resolve_cmdlet(cmd_name)
                 if not cmd_fn:
                     log(f"Unknown command: {cmd_name}", file=sys.stderr)
                     pipeline_status = "failed"
                     pipeline_error = f"Unknown command: {cmd_name}"
-                    return
+                    return self._exit_code(pipeline_status)
 
                 try:
                     from SYS.models import PipelineStageContext
@@ -2609,7 +2653,7 @@ class PipelineExecutor:
                             if normalized_ret != 0:
                                 pipeline_status = "failed"
                                 pipeline_error = f"Stage '{cmd_name}' failed with exit code {normalized_ret}"
-                                return
+                                return self._exit_code(pipeline_status)
 
                         if stage_index + 1 < len(stages):
                             try:
@@ -2665,7 +2709,7 @@ class PipelineExecutor:
                                         "Pipeline paused for selection — use @N to continue"
                                     )
                                     pipeline_status = "paused_selection"
-                                    return
+                                    return self._exit_code(pipeline_status)
 
                         output_table = None
                         if stage_index + 1 >= len(stages):
@@ -2760,7 +2804,7 @@ class PipelineExecutor:
                     debug(
                         f"Error in stage {stage_index} ({cmd_name}): {exc}"
                     )
-                    return
+                    return self._exit_code(pipeline_status)
         except Exception as exc:
             pipeline_status = "failed"
             pipeline_error = f"{type(exc).__name__}: {exc}"
@@ -2819,6 +2863,7 @@ class PipelineExecutor:
                 logger.exception(
                     "Failed to record last execution result for pipeline"
                 )
+        return self._exit_code(pipeline_status)
 
 
 __all__ = ["PipelineExecutor"]
