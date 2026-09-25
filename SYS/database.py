@@ -590,7 +590,7 @@ def rows_to_config(rows) -> Dict[str, Any]:
                     name_dict = sub_dict.setdefault(name, {})
                     name_dict[key] = parsed_val
             elif cat in ('provider', 'store', 'tool'):
-                continue
+                config.setdefault(cat, {}).setdefault(sub, {})[key] = parsed_val
             else:
                 config.setdefault(cat, {})[key] = parsed_val
 
@@ -610,6 +610,16 @@ def _decode_config_scalar(value: Any) -> Any:
             return json.loads(value)
         except Exception:
             return value
+    if __import__("re").fullmatch(r"-?\d+", text):
+        try:
+            return int(text)
+        except Exception:
+            return value
+    if __import__("re").fullmatch(r"-?\d+\.\d+", text):
+        try:
+            return float(text)
+        except Exception:
+            return value
     return value
 
 
@@ -623,15 +633,21 @@ def _plugin_settings_from_document(plugin: str, document: Any) -> Dict[str, Any]
         return {}
     settings: Dict[str, Any] = {}
     for key, value in document.items():
-        if isinstance(value, str):
-            try:
-                from SYS.config_crypto import decrypt_config_value
+        key_text = str(key)
+        secret = False
+        try:
+            from SYS.config_crypto import decrypt_config_value, is_secret_key
 
-                value = decrypt_config_value(value, "plugin", plugin, str(key))
-            except Exception:
-                pass
+            secret = bool(is_secret_key(plugin, key_text))
+            if isinstance(value, str):
+                value = decrypt_config_value(value, "plugin", plugin, key_text)
+        except Exception:
+            secret = False
+        if isinstance(value, str) and not secret:
             value = _decode_config_scalar(value)
-        settings[str(key)] = value
+        elif isinstance(value, str) and secret and value[:1] in "{[\"":
+            value = _decode_config_scalar(value)
+        settings[key_text] = value
     return settings
 
 
@@ -721,15 +737,21 @@ def write_config_documents(conn, config: Dict[str, Any]) -> int:
             if not isinstance(settings, dict):
                 continue
             stored: Dict[str, Any] = {}
+            secret = None
+            try:
+                from SYS.config_crypto import is_secret_key
+
+                secret = is_secret_key
+            except Exception:
+                secret = None
             for key, value in settings.items():
-                if isinstance(value, dict):
-                    continue
-                if encrypt_config_value is not None:
-                    stored[str(key)] = encrypt_config_value(
-                        config, "plugin", plugin_name, str(key), value
+                key_text = str(key)
+                if secret is not None and secret(plugin_name, key_text) and encrypt_config_value is not None:
+                    stored[key_text] = encrypt_config_value(
+                        config, "plugin", plugin_name, key_text, value
                     )
                 else:
-                    stored[str(key)] = value
+                    stored[key_text] = value
             plugin_rows.append(
                 (plugin_name, str(instance_name), json.dumps(stored, ensure_ascii=False))
             )
@@ -748,6 +770,42 @@ def write_config_documents(conn, config: Dict[str, Any]) -> int:
         )
         count += 1
     return count
+
+
+def _fold_legacy_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Move pre-plugin store/provider/tool blocks into plugin documents."""
+    plugins = config.get("plugin")
+    if not isinstance(plugins, dict):
+        plugins = {}
+        config["plugin"] = plugins
+    legacy = {}
+    for section_name in ("store", "provider", "tool"):
+        section = config.pop(section_name, None)
+        if isinstance(section, dict):
+            legacy[section_name] = section
+    debrid = None
+    store = legacy.get("store") or {}
+    provider = legacy.get("provider") or {}
+    if isinstance(store.get("debrid"), dict):
+        debrid = store.get("debrid")
+    elif isinstance(provider.get("alldebrid"), dict):
+        debrid = provider.get("alldebrid")
+    if isinstance(debrid, dict) and debrid:
+        target = plugins.get("alldebrid")
+        if not isinstance(target, dict):
+            target = {}
+        for key, value in debrid.items():
+            target.setdefault(key, value)
+        plugins["alldebrid"] = target
+    for section in legacy.values():
+        for name, block in section.items():
+            if str(name) in {"debrid", "alldebrid"}:
+                continue
+            if isinstance(block, dict) and str(name) not in plugins:
+                plugins[str(name)] = block
+    if not plugins:
+        config.pop("plugin", None)
+    return config
 
 
 def _documents_initialized(conn) -> bool:
@@ -775,7 +833,7 @@ def get_config_all() -> Dict[str, Any]:
             finally:
                 cur.close()
             if rows:
-                migrated = rows_to_config(rows)
+                migrated = _fold_legacy_config(rows_to_config(rows))
                 write_config_documents(conn, migrated)
                 cur = conn.cursor()
                 try:

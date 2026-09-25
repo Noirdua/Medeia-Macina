@@ -673,7 +673,7 @@ class PipelineExecutor:
                     logger.exception(
                         "%s selector failed during selection: %s", key, exc
                     )
-                    return True
+                    return False
                 if handled:
                     return True
 
@@ -697,7 +697,7 @@ class PipelineExecutor:
                                 key,
                                 exc,
                             )
-                            return True
+                            return False
                         if detail_handled:
                             return True
 

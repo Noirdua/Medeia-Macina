@@ -433,7 +433,7 @@ def set_last_execution_result(
     text_status = str(status or "").strip().lower() or "unknown"
     state.last_execution_result = {
         "status": text_status,
-        "success": text_status == "completed",
+        "success": text_status in {"completed", "paused_selection"},
         "error": str(error or "").strip(),
         "command_text": str(command_text or "").strip(),
         "finished_at": time.time(),

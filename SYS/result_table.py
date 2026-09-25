@@ -1283,8 +1283,6 @@ class Table:
             self._add_search_result(row, result)
         elif pipe_object_type is not None and isinstance(result, pipe_object_type):
             self._add_pipe_object(row, result)
-        elif getattr(getattr(result, "__class__", None), "__name__", "") == "ResultItem":
-            self._add_result_item(row, result)
         # Handle dict
         elif isinstance(result, dict):
             self._add_dict(row, result)
@@ -1419,51 +1417,6 @@ class Table:
             selection_action = md_dict.get("_selection_action") or md_dict.get("selection_action")
         if selection_action:
             row.selection_action = [str(a) for a in selection_action if a is not None]
-
-    def _add_result_item(self, row: Row, item: Any) -> None:
-        """Extract and add ResultItem fields to row (compact display for search results).
-
-        Shows only essential columns:
-        - Title (required)
-        - Ext (extension)
-        - Storage (source backend)
-        - Size (formatted MB, integer only)
-
-        All other fields are stored in item but not displayed to keep table compact.
-        Use @row# syntax to pipe full item data to next command.
-        """
-        # Title (required)
-        title = getattr(item, "title", None) or "Unknown"
-        table = str(getattr(item,
-                            "table",
-                            "") or getattr(item,
-                                           "store",
-                                           "") or "").lower()
-
-        # Handle extension separation for local files
-        extension = ""
-        if title and table == "local":
-            # Try to split extension
-            path_obj = Path(title)
-            if path_obj.suffix:
-                extension = path_obj.suffix.lstrip(".")
-                title = path_obj.stem
-
-        if title:
-            row.add_column("Title", title)
-
-        # Extension column - always add to maintain column order
-        row.add_column("Ext", extension)
-
-        # Storage (source backend - hydrus, local, debrid, etc)
-        if getattr(item, "table", None):
-            row.add_column("Storage", str(getattr(item, "table")))
-        elif getattr(item, "store", None):
-            row.add_column("Storage", str(getattr(item, "store")))
-
-        # Size (for files)
-        if hasattr(item, "size_bytes") and item.size_bytes:
-            row.add_column("Size", _format_size(item.size_bytes, integer_only=False))
 
     def _add_tag_item(self, row: Row, item: Any) -> None:
         """Extract and add TagItem fields to row (compact tag display).

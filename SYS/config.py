@@ -29,10 +29,7 @@ except Exception:
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Save lock settings (cross-process)
-_SAVE_LOCK_DIRNAME = ".medios_save_lock"
-_SAVE_LOCK_TIMEOUT = 30.0  # seconds to wait for save lock
-_SAVE_LOCK_STALE_SECONDS = 3600  # consider lock stale after 1 hour
-_SAVE_LOCK_POLL_INTERVAL = 0.1  # seconds between lock acquisition attempts
+
 
 _WAL_CHECKPOINT_TIMEOUT = 5.0  # seconds for WAL checkpoint connection
 
@@ -836,6 +833,7 @@ def _multi_instance_plugin_names() -> frozenset[str]:
             if str(name).strip()
         )
     except Exception:
+        _multi_instance_plugin_names.cache_clear()
         return frozenset()
 
 
@@ -1396,10 +1394,7 @@ def save_config(config: Dict[str, Any]) -> int:
             # Detect concurrent changes by reading the current DB state inside the
             # same transaction before mutating it. Use the transaction connection
             # directly to avoid acquiring the connection lock again (deadlock).
-            try:
-                current_disk = _prepare_disk_snapshot(read_config_documents(conn))
-            except Exception:
-                current_disk = {}
+            current_disk = _prepare_disk_snapshot(read_config_documents(conn))
 
             # Compare logical entries, not raw nested dict identity/shape. Save writes
             # encrypt/normalize values, so a naive dict compare false-conflicts after

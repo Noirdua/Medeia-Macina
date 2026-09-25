@@ -1032,13 +1032,16 @@ class PageSession:
             merged.update(headers)
         return merged
 
-    def get(
+    def request(
         self,
+        method: str,
         url: str,
         *,
         params: Optional[Dict[str, Any]] = None,
-        timeout: Any = None,
+        data: Any = None,
+        json: Any = None,
         headers: Optional[Dict[str, str]] = None,
+        timeout: Any = None,
         stream: bool = False,
         allow_redirects: bool = True,
     ) -> PageResponse:
@@ -1046,43 +1049,40 @@ class PageSession:
         request_timeout = _page_timeout(timeout) if timeout is not None else None
         if stream:
             stream_cm = self._client.stream(
-                "GET",
+                method,
                 url,
                 params=params,
+                data=data,
+                json=json,
                 headers=request_headers,
                 timeout=request_timeout,
                 follow_redirects=allow_redirects,
             )
             response = stream_cm.__enter__()
             return PageResponse(response, closer=lambda: stream_cm.__exit__(None, None, None))
-        response = self._client.get(
+        response = self._client.request(
+            method,
             url,
             params=params,
+            data=data,
+            json=json,
             headers=request_headers,
             timeout=request_timeout,
             follow_redirects=allow_redirects,
         )
         return PageResponse(response)
 
-    def post(
-        self,
-        url: str,
-        *,
-        data: Any = None,
-        json: Any = None,
-        headers: Optional[Dict[str, str]] = None,
-        timeout: Any = None,
-        allow_redirects: bool = True,
-    ) -> PageResponse:
-        response = self._client.post(
-            url,
-            data=data,
-            json=json,
-            headers=self._request_headers(headers),
-            timeout=_page_timeout(timeout) if timeout is not None else None,
-            follow_redirects=allow_redirects,
-        )
-        return PageResponse(response)
+    def get(self, url: str, **kwargs: Any) -> PageResponse:
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs: Any) -> PageResponse:
+        return self.request("POST", url, **kwargs)
+
+    def put(self, url: str, **kwargs: Any) -> PageResponse:
+        return self.request("PUT", url, **kwargs)
+
+    def head(self, url: str, **kwargs: Any) -> PageResponse:
+        return self.request("HEAD", url, **kwargs)
 
 
 def get_page_session() -> PageSession:

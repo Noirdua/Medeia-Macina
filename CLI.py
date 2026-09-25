@@ -8,7 +8,6 @@ This module intentionally uses a class-based architecture:
 """
 
 import json
-import re
 import sys
 import threading
 import time
@@ -16,11 +15,10 @@ import uuid
 from copy import deepcopy
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, cast
 
 import typer
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.styles import Style
 from rich.console import Console
@@ -29,10 +27,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.bar import Bar
 from rich.table import Table as RichTable
-from SYS.rich_display import (
-    stderr_console,
-    stdout_console,
-)
+from SYS.rich_display import stdout_console
 from cmdnat._status_shared import (
     add_startup_check as _shared_add_startup_check,
     collect_plugin_startup_checks as _collect_plugin_startup_checks,
@@ -59,28 +54,16 @@ _install_rich_traceback(show_locals=False)
 
 from SYS.logger import debug, set_debug
 from SYS.repl_queue import clear_repl_state, pop_repl_commands, touch_repl_state
-from SYS.worker_manager import WorkerManager
-
-from SYS.cmdlet_catalog import (
-    get_cmdlet_arg_choices,
-    get_cmdlet_arg_flags,
-    get_cmdlet_arg_flags_from_object,
-    get_cmdlet_metadata,
-    import_cmd_module,
-    list_cmdlet_metadata,
-    list_cmdlet_names,
-)
+from SYS.cmdlet_catalog import list_cmdlet_names
 from SYS.config import load_config
 from SYS.result_table import Table
 
-from SYS.worker import WorkerManagerRegistry, WorkerStages, WorkerOutputMirror, WorkerStageSession
 from SYS.pipeline import PipelineExecutor
-from PluginCore.registry import plugin_inline_query_choices, plugin_query_field_map
 
 
 
 # Selection parsing and REPL lexer moved to SYS.cli_parsing
-from SYS.cli_parsing import SelectionSyntax, SelectionFilterSyntax, MedeiaLexer
+from SYS.cli_parsing import SelectionSyntax, MedeiaLexer
 
 
 # SelectionFilterSyntax moved to SYS.cli_parsing (imported above)
