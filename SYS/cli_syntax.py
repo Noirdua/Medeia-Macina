@@ -75,19 +75,71 @@ def split_pipeline_tokens(tokens: Sequence[str]) -> list[list[str]]:
     return [stage for stage in stages if stage]
 
 
-def split_shell_tokens(text: str) -> list[str]:
+def _partial_shell_tokens(text: str) -> list[str]:
+    """Tokenize an incomplete line without failing on an unclosed quote."""
+    tokens: list[str] = []
+    current: list[str] = []
+    quote: Optional[str] = None
+    for ch in str(text or ""):
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+            current.append(ch)
+            continue
+        if ch.isspace():
+            token = "".join(current).strip()
+            if token:
+                tokens.append(token)
+            current = []
+            continue
+        current.append(ch)
+    tail = "".join(current).strip()
+    if tail:
+        tokens.append(tail)
+    return tokens
+
+
+def split_shell_tokens(text: str, *, partial: bool = False) -> list[str]:
     import shlex
 
     raw = str(text or "").strip()
     if not raw:
         return []
-    if os.name != "nt":
-        return shlex.split(raw)
-    lexer = shlex.shlex(raw, posix=True)
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    lexer.escape = ""
-    return list(lexer)
+    try:
+        if os.name != "nt":
+            return shlex.split(raw)
+        lexer = shlex.shlex(raw, posix=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        lexer.escape = ""
+        return list(lexer)
+    except ValueError:
+        if partial:
+            return _partial_shell_tokens(raw)
+        raise
+
+
+def tokenize_command(text: str, *, partial: bool = False) -> list[str]:
+    """Tokenize a command line, keeping unquoted '|' as its own token."""
+    raw = str(text or "")
+    stages = split_pipeline_stages(raw)
+    tokens: list[str] = []
+    for index, stage in enumerate(stages):
+        if index:
+            tokens.append("|")
+        try:
+            tokens.extend(split_shell_tokens(stage, partial=partial))
+        except ValueError:
+            if not partial:
+                raise
+            tokens.extend(_partial_shell_tokens(stage))
+    if raw.rstrip().endswith("|") and (not tokens or tokens[-1] != "|"):
+        tokens.append("|")
+    return tokens
 
 
 def _tokenize_stage(stage_text: str) -> list[str]:

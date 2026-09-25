@@ -629,9 +629,9 @@ def query_web_search(
     Uses Yahoo first (works in environments where Bing/DDG HTML endpoints
     are challenge-gated), then Bing, then DuckDuckGo.
     """
-    from API.requests_client import get_requests_session
+    from API.HTTP import get_page_session
 
-    session = get_requests_session()
+    session = get_page_session()
     normalized_limit = max(1, min(int(limit or 1), 100))
     engine_deadline = time.monotonic() + 12.0
 
@@ -969,9 +969,9 @@ def _scrape_page(page_url: str, *, timeout: float = 12.0) -> tuple[str, List[Dic
         if time.monotonic() - cached_at <= _SCRAPE_CACHE_TTL:
             return "html", assets
 
-    from API.requests_client import get_requests_session
+    from API.HTTP import get_page_session
 
-    session = get_requests_session()
+    session = get_page_session()
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -1254,7 +1254,7 @@ def crawl_site_for_extension(
     max_duration_seconds: float = 15.0,
 ) -> List[Dict[str, str]]:
     """Fallback crawler that discovers in-site file links by extension."""
-    from API.requests_client import get_requests_session
+    from API.HTTP import get_page_session
 
     normalized_ext = _normalize_extension(extension)
     if not normalized_ext:
@@ -1264,7 +1264,7 @@ def crawl_site_for_extension(
     if not start_url:
         return []
 
-    session = get_requests_session()
+    session = get_page_session()
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

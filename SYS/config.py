@@ -19,7 +19,7 @@ from SYS.logger import log, debug
 import logging
 logger = logging.getLogger(__name__)
 from SYS.utils import expand_path, safe_output_dir
-from SYS.database import db, get_config_all, rows_to_config
+from SYS.database import db, get_config_all, read_config_documents, write_config_documents
 
 try:
     from SYS.config_crypto import encrypt_config_value as _encrypt_config_value
@@ -1372,83 +1372,10 @@ def reload_config() -> Dict[str, Any]:
     return load_config()
 
 
-def _acquire_save_lock(timeout: float = _SAVE_LOCK_TIMEOUT):
-    """Acquire a cross-process save lock implemented as a directory.
-
-    Returns the Path to the created lock directory. Raises ConfigSaveConflict
-    if the lock cannot be acquired within the timeout.
-    """
-    lock_dir = Path(db.db_path).with_name(_SAVE_LOCK_DIRNAME)
-    start = time.time()
-    while True:
-        try:
-            lock_dir.mkdir(exist_ok=False)
-            # Write owner metadata for diagnostics
-            try:
-                (lock_dir / "owner.json").write_text(json.dumps({
-                    "pid": os.getpid(),
-                    "ts": time.time(),
-                    "cmdline": " ".join(sys.argv),
-                }))
-            except Exception as exc:
-                logger.exception("Failed to write save lock owner metadata %s: %s", lock_dir, exc)
-            return lock_dir
-        except FileExistsError:
-            # Check for stale lock
-            try:
-                owner = lock_dir / "owner.json"
-                if owner.exists():
-                    data = json.loads(owner.read_text())
-                    ts = data.get("ts") or 0
-                    if time.time() - ts > _SAVE_LOCK_STALE_SECONDS:
-                        try:
-                            import shutil
-                            shutil.rmtree(lock_dir)
-                            continue
-                        except Exception as exc:
-                            logger.exception("Failed to remove stale save lock dir %s", lock_dir)
-                else:
-                    # No owner file; if directory is old enough consider it stale
-                    try:
-                        if time.time() - lock_dir.stat().st_mtime > _SAVE_LOCK_STALE_SECONDS:
-                            import shutil
-                            shutil.rmtree(lock_dir)
-                            continue
-                    except Exception as exc:
-                        logger.exception("Failed to stat/remove stale save lock dir %s", lock_dir)
-            except Exception as exc:
-                logger.exception("Failed to inspect save lock directory %s: %s", lock_dir, exc)
-            if time.time() - start > timeout:
-                raise ConfigSaveConflict("Save lock busy; could not acquire in time")
-            time.sleep(_SAVE_LOCK_POLL_INTERVAL)
-
-
-def _release_save_lock(lock_dir: Path) -> None:
-    try:
-        owner = lock_dir / "owner.json"
-        try:
-            if owner.exists():
-                owner.unlink()
-        except Exception:
-            logger.exception("Failed to remove save lock owner file %s", owner)
-        lock_dir.rmdir()
-    except Exception:
-        logger.exception("Failed to release save lock directory %s", lock_dir)
-
-
 def save_config(config: Dict[str, Any]) -> int:
     global _CONFIG_CACHE, _LAST_SAVED_CONFIG
     _canonicalize_plugin_config(config)
     _sync_alldebrid_api_key(config)
-
-    # Acquire cross-process save lock to avoid concurrent saves from different
-    # processes which can lead to race conditions and DB-level overwrite.
-    lock_dir = None
-    try:
-        lock_dir = _acquire_save_lock()
-    except ConfigSaveConflict:
-        # Surface a clear exception to callers so they can retry or handle it.
-        raise
 
     previous_config = deepcopy(_LAST_SAVED_CONFIG)
     changed_count = _count_changed_entries(previous_config, config)
@@ -1470,11 +1397,7 @@ def save_config(config: Dict[str, Any]) -> int:
             # same transaction before mutating it. Use the transaction connection
             # directly to avoid acquiring the connection lock again (deadlock).
             try:
-                cur = conn.cursor()
-                cur.execute("SELECT category, subtype, item_name, key, value FROM config")
-                rows = cur.fetchall()
-                current_disk = _prepare_disk_snapshot(rows_to_config(rows))
-                cur.close()
+                current_disk = _prepare_disk_snapshot(read_config_documents(conn))
             except Exception:
                 current_disk = {}
 
@@ -1504,75 +1427,10 @@ def save_config(config: Dict[str, Any]) -> int:
                 config_to_write = merged_config
                 log("Config save rebased local changes onto newer disk configuration.")
 
-            # Proceed with writing when no conflicting external changes detected
-            conn.execute("DELETE FROM config")
-            for key, value in config_to_write.items():
-                if key in {"provider", "store", "tool"}:
-                    continue
-                if key == "plugin" and isinstance(value, dict):
-                    for subtype, instances in value.items():
-                        if not isinstance(instances, dict):
-                            continue
-                        normalized_subtype = _normalize_plugin_name(subtype)
-                        if not normalized_subtype:
-                            continue
-                        write_block = instances
-                        force_multi = normalized_subtype in _multi_instance_plugin_names()
-                        if force_multi:
-                            write_block = normalize_multi_instance_plugin_block(
-                                normalized_subtype,
-                                instances,
-                            )
-                            # Keep in-memory tree aligned with what we persist.
-                            if isinstance(config_to_write.get("plugin"), dict):
-                                config_to_write["plugin"][normalized_subtype] = write_block
-                        if force_multi or _is_multi_instance_plugin_config(write_block):
-                            for name, settings in write_block.items():
-                                if not isinstance(settings, dict):
-                                    continue
-                                for k, v in settings.items():
-                                    if isinstance(v, dict):
-                                        # Never persist nested instance maps as field values.
-                                        continue
-                                    if _encrypt_config_value is not None:
-                                        val_str = _encrypt_config_value(config_to_write, "plugin", normalized_subtype, k, v)
-                                    else:
-                                        val_str = json.dumps(v) if not isinstance(v, str) else v
-                                    conn.execute(
-                                        "INSERT OR REPLACE INTO config (category, subtype, item_name, key, value) VALUES (?, ?, ?, ?, ?)",
-                                        ("plugin", normalized_subtype, name, k, val_str),
-                                    )
-                                    count += 1
-                        else:
-                            for k, v in write_block.items():
-                                if isinstance(v, dict):
-                                    continue
-                                if _encrypt_config_value is not None:
-                                    val_str = _encrypt_config_value(config_to_write, "plugin", normalized_subtype, k, v)
-                                else:
-                                    val_str = json.dumps(v) if not isinstance(v, str) else v
-                                conn.execute(
-                                    "INSERT OR REPLACE INTO config (category, subtype, item_name, key, value) VALUES (?, ?, ?, ?, ?)",
-                                    ("plugin", normalized_subtype, "default", k, val_str),
-                                )
-                                count += 1
-                else:
-                    if not key.startswith("_") and value is not None:
-                        val_str = json.dumps(value) if not isinstance(value, str) else value
-                        conn.execute(
-                            "INSERT OR REPLACE INTO config (category, subtype, item_name, key, value) VALUES (?, ?, ?, ?, ?)",
-                            ("global", "none", "none", key, val_str),
-                        )
-                        count += 1
+            count = write_config_documents(conn, config_to_write)
 
-            # Re-read inside the same transaction so the baseline matches the
-            # encrypted/round-tripped representation that future saves will see.
             try:
-                cur = conn.cursor()
-                cur.execute("SELECT category, subtype, item_name, key, value FROM config")
-                refreshed_rows = cur.fetchall()
-                refreshed = _prepare_disk_snapshot(rows_to_config(refreshed_rows))
-                cur.close()
+                refreshed = _prepare_disk_snapshot(read_config_documents(conn))
             except Exception:
                 refreshed = deepcopy(config_to_write)
                 _canonicalize_plugin_config(refreshed)
@@ -1614,36 +1472,18 @@ def save_config(config: Dict[str, Any]) -> int:
                 log(f"Warning: WAL checkpoint failed: {exc}")
 
             # Forensics disabled: audit/logs/backups removed to keep save lean.
-            # Release the save lock we acquired earlier
-            try:
-                if lock_dir is not None and lock_dir.exists():
-                    _release_save_lock(lock_dir)
-            except Exception as exc:
-                logger.exception("Failed to release save lock during save flow: %s", exc)
-
             break
         except sqlite3.OperationalError as exc:
             attempts += 1
             locked_error = "locked" in str(exc).lower()
             if not locked_error or attempts >= _CONFIG_SAVE_MAX_RETRIES:
                 log(f"CRITICAL: Database write failed: {exc}")
-                # Ensure we release potential save lock before bubbling error
-                try:
-                    if lock_dir is not None and lock_dir.exists():
-                        _release_save_lock(lock_dir)
-                except Exception as exc:
-                    logger.exception("Failed to release save lock after DB write failure: %s", exc)
                 raise
             delay = _CONFIG_SAVE_RETRY_DELAY * attempts
             log(f"Database locked; retry {attempts}/{_CONFIG_SAVE_MAX_RETRIES} in {delay:.2f}s")
             time.sleep(delay)
         except Exception as exc:
             log(f"CRITICAL: Configuration save failed: {exc}")
-            try:
-                if lock_dir is not None and lock_dir.exists():
-                    _release_save_lock(lock_dir)
-            except Exception as exc:
-                logger.exception("Failed to release save lock after CRITICAL configuration save failure: %s", exc)
             raise
 
     return saved_entries

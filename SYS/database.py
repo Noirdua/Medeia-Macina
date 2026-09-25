@@ -3,7 +3,6 @@ from __future__ import annotations
 import atexit
 import sqlite3
 import json
-import ast
 import threading
 import os
 from queue import Queue
@@ -111,6 +110,20 @@ class Database:
                 key TEXT,
                 value TEXT,
                 PRIMARY KEY (category, subtype, item_name, key)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS config_global (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                document TEXT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS config_plugin (
+                plugin TEXT NOT NULL,
+                instance TEXT NOT NULL,
+                document TEXT NOT NULL,
+                PRIMARY KEY (plugin, instance)
             )
         """)
 
@@ -482,16 +495,24 @@ except ImportError:
     pass
 
 def save_config_value(category: str, subtype: str, item_name: str, key: str, value: Any):
-    """Save a configuration value to the database and invalidate config cache."""
-    try:
-        from SYS.config_crypto import encrypt_config_value
-        val_str = encrypt_config_value({}, category, subtype, key, value)
-    except Exception:
-        val_str = json.dumps(value) if not isinstance(value, str) else value
-    db.execute(
-        "INSERT OR REPLACE INTO config (category, subtype, item_name, key, value) VALUES (?, ?, ?, ?, ?)",
-        (category, subtype, item_name, key, val_str)
-    )
+    """Update one config field in the document store and invalidate the cache."""
+    config = get_config_all()
+    if category == "global":
+        config[key] = value
+    elif category == "plugin":
+        plugins = config.setdefault("plugin", {})
+        block = plugins.setdefault(subtype, {})
+        instance = str(item_name or "default")
+        if instance.lower() == "default" and not isinstance(next(iter(block.values()), None), dict):
+            block[key] = value
+        else:
+            settings = block.setdefault(instance, {})
+            if isinstance(settings, dict):
+                settings[key] = value
+    else:
+        return
+    with db.transaction() as conn:
+        write_config_documents(conn, config)
     try:
         from SYS.config import clear_config_cache
         clear_config_cache()
@@ -517,11 +538,7 @@ def rows_to_config(rows) -> Dict[str, Any]:
         if cat == 'store' and str(sub).strip().lower() == 'folder':
             continue
 
-        # Conservative JSON parsing: only attempt to decode when the value
-        # looks like JSON (object/array/quoted string/true/false/null/number).
-        # If JSON decoding fails, also attempt Python literal parsing (e.g., single-quoted
-        # dict/list reprs) using ast.literal_eval as a safe fallback. If both
-        # attempts fail, use the raw string value.
+        # JSON only. Values that are not JSON stay raw strings.
         # Decrypt encrypted values before use.
         try:
             from SYS.config_crypto import decrypt_config_value
@@ -541,12 +558,7 @@ def rows_to_config(rows) -> Dict[str, Any]:
                         try:
                             parsed_val = json.loads(val)
                         except Exception:
-                            # Try parsing Python literal formats (single-quoted dicts/lists)
-                            try:
-                                parsed_val = ast.literal_eval(val)
-                                debug(f"Parsed config value for key '{key}' using ast.literal_eval (non-JSON literal)")
-                            except Exception:
-                                parsed_val = val
+                            parsed_val = val
                     else:
                         parsed_val = val
             else:
@@ -585,10 +597,192 @@ def rows_to_config(rows) -> Dict[str, Any]:
     return config
 
 
+def _decode_config_scalar(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return ""
+    first = text[0]
+    lowered = text.lower()
+    if first in ("{", "[", '"') or lowered in ("true", "false", "null"):
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+    return value
+
+
+def _plugin_settings_from_document(plugin: str, document: Any) -> Dict[str, Any]:
+    if isinstance(document, str):
+        try:
+            document = json.loads(document)
+        except Exception:
+            return {}
+    if not isinstance(document, dict):
+        return {}
+    settings: Dict[str, Any] = {}
+    for key, value in document.items():
+        if isinstance(value, str):
+            try:
+                from SYS.config_crypto import decrypt_config_value
+
+                value = decrypt_config_value(value, "plugin", plugin, str(key))
+            except Exception:
+                pass
+            value = _decode_config_scalar(value)
+        settings[str(key)] = value
+    return settings
+
+
+def read_config_documents(conn) -> Dict[str, Any]:
+    """Load the in-memory config dict from JSON documents."""
+    global_doc: Dict[str, Any] = {}
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT document FROM config_global WHERE id = 1")
+        row = cur.fetchone()
+        if row and row[0]:
+            parsed = json.loads(row[0])
+            if isinstance(parsed, dict):
+                global_doc = parsed
+        cur.execute("SELECT plugin, instance, document FROM config_plugin")
+        plugin_rows = cur.fetchall()
+    finally:
+        cur.close()
+
+    config = dict(global_doc)
+    plugins: Dict[str, Any] = {}
+    grouped: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for plugin, instance, document in plugin_rows:
+        plugin_name = str(plugin or "").strip()
+        instance_name = str(instance or "").strip() or "default"
+        if not plugin_name:
+            continue
+        grouped.setdefault(plugin_name, {})[instance_name] = _plugin_settings_from_document(
+            plugin_name, document
+        )
+    multi_names: set[str] = set()
+    try:
+        from SYS.config import _multi_instance_plugin_names
+
+        multi_names = {str(name).strip().lower() for name in _multi_instance_plugin_names()}
+    except Exception:
+        multi_names = set()
+    for plugin_name, instances in grouped.items():
+        named = {name for name in instances if name.lower() != "default"}
+        if plugin_name.strip().lower() in multi_names or named:
+            plugins[plugin_name] = instances
+        else:
+            plugins[plugin_name] = instances.get("default", next(iter(instances.values()), {}))
+    if plugins:
+        config["plugin"] = plugins
+    return config
+
+
+def write_config_documents(conn, config: Dict[str, Any]) -> int:
+    """Replace stored documents from an in-memory config dict. Returns row count."""
+    from SYS.config import (
+        _is_multi_instance_plugin_config,
+        _multi_instance_plugin_names,
+        normalize_multi_instance_plugin_block,
+    )
+
+    try:
+        from SYS.config_crypto import encrypt_config_value
+    except Exception:
+        encrypt_config_value = None
+
+    global_doc = {
+        key: value
+        for key, value in config.items()
+        if key not in {"plugin", "provider", "store", "tool"}
+        and not str(key).startswith("_")
+        and value is not None
+    }
+    plugin_rows: List[tuple] = []
+    plugins = config.get("plugin") if isinstance(config.get("plugin"), dict) else {}
+    multi_names = {str(name).strip().lower() for name in _multi_instance_plugin_names()}
+    for subtype, instances in plugins.items():
+        if not isinstance(instances, dict):
+            continue
+        plugin_name = str(subtype or "").strip()
+        if not plugin_name:
+            continue
+        force_multi = plugin_name.lower() in multi_names
+        write_block = instances
+        if force_multi:
+            write_block = normalize_multi_instance_plugin_block(plugin_name, instances)
+        if force_multi or _is_multi_instance_plugin_config(write_block):
+            instance_items = write_block.items()
+        else:
+            instance_items = (("default", write_block),)
+        for instance_name, settings in instance_items:
+            if not isinstance(settings, dict):
+                continue
+            stored: Dict[str, Any] = {}
+            for key, value in settings.items():
+                if isinstance(value, dict):
+                    continue
+                if encrypt_config_value is not None:
+                    stored[str(key)] = encrypt_config_value(
+                        config, "plugin", plugin_name, str(key), value
+                    )
+                else:
+                    stored[str(key)] = value
+            plugin_rows.append(
+                (plugin_name, str(instance_name), json.dumps(stored, ensure_ascii=False))
+            )
+
+    conn.execute("DELETE FROM config_global")
+    conn.execute("DELETE FROM config_plugin")
+    conn.execute(
+        "INSERT INTO config_global (id, document) VALUES (1, ?)",
+        (json.dumps(global_doc, ensure_ascii=False),),
+    )
+    count = 1
+    for plugin_name, instance_name, document in plugin_rows:
+        conn.execute(
+            "INSERT INTO config_plugin (plugin, instance, document) VALUES (?, ?, ?)",
+            (plugin_name, instance_name, document),
+        )
+        count += 1
+    return count
+
+
+def _documents_initialized(conn) -> bool:
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM config_global LIMIT 1")
+        if cur.fetchone():
+            return True
+        cur.execute("SELECT 1 FROM config_plugin LIMIT 1")
+        return cur.fetchone() is not None
+    finally:
+        cur.close()
+
+
 def get_config_all() -> Dict[str, Any]:
-    """Retrieve all configuration from the database in the canonical plugin-centric dict format."""
-    rows = db.fetchall("SELECT category, subtype, item_name, key, value FROM config")
-    return rows_to_config(rows)
+    """Retrieve configuration as JSON documents, migrating the old EAV table once."""
+    with db.transaction() as conn:
+        if not _documents_initialized(conn):
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT category, subtype, item_name, key, value FROM config")
+                rows = cur.fetchall()
+            except Exception:
+                rows = []
+            finally:
+                cur.close()
+            if rows:
+                migrated = rows_to_config(rows)
+                write_config_documents(conn, migrated)
+                cur = conn.cursor()
+                try:
+                    cur.execute("DELETE FROM config")
+                finally:
+                    cur.close()
+        return read_config_documents(conn)
 
 
 # Worker Management Methods for medios.db

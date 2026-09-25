@@ -761,7 +761,7 @@ def _book_isbn_candidates(
     if not title and not archive_ids:
         return ()
     try:
-        from API.requests_client import get_requests_session
+        from API.HTTP import get_page_session
         from PluginCore.registry import plugin_attr
 
         OpenLibraryMetadataPlugin = plugin_attr("metadata_plus", "OpenLibraryMetadataPlugin") or plugin_attr(
@@ -769,7 +769,7 @@ def _book_isbn_candidates(
         )
         if OpenLibraryMetadataPlugin is None:
             return ()
-        session = get_requests_session()
+        session = get_page_session()
         plugin = OpenLibraryMetadataPlugin({})
         queries = []
         for ident in archive_ids or []:

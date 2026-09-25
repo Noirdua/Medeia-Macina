@@ -31,7 +31,7 @@ Startup chrome is loadable from `design/`: `mm.md` (`[mm]` launcher prefix), `ka
 | `PluginCore/` | Plugin load, `Provider`/`SearchResult`, `BackendRegistry` |
 | `plugins/<name>/` | One plugin per folder; optional `api/`, `store_backend.py` |
 | `SYS/` | Config, SQLite, result tables, pipeline, logging, utils |
-| `API/` | HTTP: `HTTP.py` (`HTTPClient`), `httpx_shared.py` (pooled clients), `requests_client.py` |
+| `API/` | HTTP: `HTTP.py` (`HTTPClient`, `get_page_session`), `httpx_shared.py` (pooled clients) |
 | `tests/` | Pytest files named `test_*.py`. **Gitignored** by `.gitignore` `test*` — they exist on disk but are **not shipped** unless force-added. Run with `python -m pytest tests/... -o addopts=` to skip coverage defaults. |
 
 ## Runtime model
@@ -76,7 +76,7 @@ Three layers — do not add a fourth:
 ## HTTP
 
 - Prefer `API.HTTP.HTTPClient` for cmdlets/plugins. It uses `API.httpx_shared.get_shared_httpx_client` (pooled; do not close the shared client in `__exit__`).
-- Page scrape / crawlers: `API.requests_client.get_requests_session`.
+- Page scrape / crawlers: `API.HTTP.get_page_session` (httpx, not a second `requests` stack).
 - Downloads: `download_direct_file` in `API.HTTP`. Unique filenames: `SYS.utils.unique_path`. Filename sanitizing: `SYS.utils.sanitize_filename`. Booleans/ints from config: `SYS.utils.coerce_bool` / `coerce_int`.
 - Field access: `SYS.item_accessors.get_field`; `SYS.field_access` re-exports it.
 - Arg parsing: `SYS.command_parsing`; `cmdnat._parsing` re-exports it.

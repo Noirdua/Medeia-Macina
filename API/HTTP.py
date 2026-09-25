@@ -958,6 +958,147 @@ def download_direct_file(
         raise DownloadError(f"Error downloading file: {exc}") from exc
 
 
+class PageResponse:
+    """httpx response with the page-fetch methods scrapers already call."""
+
+    def __init__(self, response: httpx.Response, *, closer: Optional[Callable[[], None]] = None):
+        self._response = response
+        self._closer = closer
+        self.url = str(response.url)
+        self.headers = response.headers
+        self.status_code = response.status_code
+
+    def raise_for_status(self) -> None:
+        self._response.raise_for_status()
+
+    @property
+    def text(self) -> str:
+        return self._response.text
+
+    @property
+    def content(self) -> bytes:
+        return self._response.content
+
+    def json(self) -> Any:
+        return self._response.json()
+
+    def iter_content(self, chunk_size: int = 65536):
+        return self._response.iter_bytes(chunk_size=chunk_size)
+
+    def close(self) -> None:
+        try:
+            self._response.close()
+        finally:
+            if self._closer is not None:
+                self._closer()
+                self._closer = None
+
+    def __enter__(self) -> "PageResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+
+def _page_timeout(timeout: Any) -> httpx.Timeout:
+    if isinstance(timeout, tuple) and len(timeout) == 2:
+        connect = float(timeout[0])
+        read = float(timeout[1])
+        return httpx.Timeout(connect=connect, read=read, write=read, pool=connect)
+    if isinstance(timeout, (int, float)) and timeout:
+        value = float(timeout)
+        return httpx.Timeout(connect=min(value, 10.0), read=value, write=value, pool=min(value, 10.0))
+    return httpx.Timeout(10.0)
+
+
+class PageSession:
+    """Cookie-keeping httpx session for page fetch and login flows."""
+
+    def __init__(self) -> None:
+        self.headers: Dict[str, str] = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36"
+            )
+        }
+        self._client = httpx.Client(follow_redirects=True, timeout=30.0)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def _request_headers(self, headers: Optional[Dict[str, str]]) -> Dict[str, str]:
+        merged = dict(self.headers)
+        if headers:
+            merged.update(headers)
+        return merged
+
+    def get(
+        self,
+        url: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: Any = None,
+        headers: Optional[Dict[str, str]] = None,
+        stream: bool = False,
+        allow_redirects: bool = True,
+    ) -> PageResponse:
+        request_headers = self._request_headers(headers)
+        request_timeout = _page_timeout(timeout) if timeout is not None else None
+        if stream:
+            stream_cm = self._client.stream(
+                "GET",
+                url,
+                params=params,
+                headers=request_headers,
+                timeout=request_timeout,
+                follow_redirects=allow_redirects,
+            )
+            response = stream_cm.__enter__()
+            return PageResponse(response, closer=lambda: stream_cm.__exit__(None, None, None))
+        response = self._client.get(
+            url,
+            params=params,
+            headers=request_headers,
+            timeout=request_timeout,
+            follow_redirects=allow_redirects,
+        )
+        return PageResponse(response)
+
+    def post(
+        self,
+        url: str,
+        *,
+        data: Any = None,
+        json: Any = None,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: Any = None,
+        allow_redirects: bool = True,
+    ) -> PageResponse:
+        response = self._client.post(
+            url,
+            data=data,
+            json=json,
+            headers=self._request_headers(headers),
+            timeout=_page_timeout(timeout) if timeout is not None else None,
+            follow_redirects=allow_redirects,
+        )
+        return PageResponse(response)
+
+
+def get_page_session() -> PageSession:
+    import threading
+
+    local = getattr(get_page_session, "_local", None)
+    if local is None:
+        local = threading.local()
+        setattr(get_page_session, "_local", local)
+    session = getattr(local, "session", None)
+    if session is None:
+        session = PageSession()
+        local.session = session
+    return session
+
+
 def upload_with_content_length(
     *,
     method: str,

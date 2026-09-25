@@ -368,24 +368,24 @@ class CmdletCompleter(Completer):
 
     @staticmethod
     def _flag_value(tokens: Sequence[str], *flags: str) -> Optional[str]:
-        want = {str(f).strip().lower() for f in flags if str(f).strip()}
-        if not want:
+        from SYS.command_parsing import extract_arg_value
+
+        value = extract_arg_value(tokens, flags=flags)
+        if value is None:
             return None
+        if not str(value).lstrip().startswith("["):
+            return value
+        want = {str(flag).strip().lower() for flag in flags if str(flag).strip()}
         for idx, tok in enumerate(tokens):
-            low = str(tok or "").strip().lower()
-            if "=" in low:
-                head, _ = low.split("=", 1)
-                if head in want:
-                    return tok.split("=", 1)[1]
-            if low in want and idx + 1 < len(tokens):
+            if str(tok or "").strip().lower() in want and idx + 1 < len(tokens):
                 try:
                     from SYS.utils import consume_bracket_list
 
                     joined, _end = consume_bracket_list(tokens, idx)
-                    return joined or tokens[idx + 1]
+                    return joined or value
                 except Exception:
-                    return tokens[idx + 1]
-        return None
+                    return value
+        return value
 
     @staticmethod
     def _effective_cmd_name(cmd_name: str, stage_tokens: Sequence[str]) -> str:
@@ -1375,44 +1375,9 @@ class CmdletCompleter(Completer):
 
     @staticmethod
     def _tokenize_quoted(text: str) -> List[str]:
-        """Tokenize text preserving quoted strings as single tokens.
-        
-        Handles pipes as pipeline separators and preserves quoted strings
-        (single or double quotes) as atomic tokens.
-        """
-        tokens = []
-        current = ""
-        in_quote = None  # None, "'", or '"'
-        i = 0
-        
-        while i < len(text):
-            char = text[i]
-            
-            if in_quote:
-                current += char
-                if char == in_quote and (i == 0 or text[i - 1] != "\\"):
-                    in_quote = None
-            elif char in ("'", '"'):
-                in_quote = char
-                current += char
-            elif char == "|":
-                if current.strip():
-                    tokens.append(current.strip())
-                tokens.append("|")
-                current = ""
-            elif char.isspace():
-                if current.strip():
-                    tokens.append(current.strip())
-                current = ""
-            else:
-                current += char
-            
-            i += 1
-        
-        if current.strip():
-            tokens.append(current.strip())
-        
-        return tokens
+        from SYS.cli_syntax import tokenize_command
+
+        return tokenize_command(text, partial=True)
 
     @staticmethod
     def _hidden_impl_cmdlet_names() -> Set[str]:
