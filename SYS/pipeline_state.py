@@ -854,12 +854,14 @@ def _cached_item_matches(
 ) -> bool:
     if item is None:
         return False
+    from SYS.utils import path_key
+
     want_hash = str(file_hash or "").strip().lower()
     want_store = str(instance or "").strip().lower()
-    want_path = str(path or "").strip().lower()
+    want_path = path_key(path)
     have_hash = _cached_item_field(item, "hash").lower()
     have_store = _cached_item_field(item, "store", "instance").lower()
-    have_path = _cached_item_field(item, "path").lower()
+    have_path = path_key(_cached_item_field(item, "path"))
     if want_store and have_store and have_store != want_store:
         return False
     if want_hash and have_hash == want_hash:

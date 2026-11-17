@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import posixpath
 import shutil
 import os
 import base64
@@ -12,6 +13,7 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable, List, Sequence
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 
@@ -170,24 +172,111 @@ def ensure_directory(path: Path) -> None:
         raise RuntimeError(f"Failed to create directory {path}: {exc}") from exc
 
 
-def unique_path(path: Path) -> Path:
-    """Return a unique path by appending " (n)" if needed."""
+_CONTENT_DISPOSITION_FILENAME_RE = re.compile(
+    r"""filename\*?=(?:UTF-8''\s*)?(?:"([^"]*)"|([^;\s]+))""",
+    flags=re.IGNORECASE,
+)
+
+
+def filename_from_url(url: Any) -> str:
+    """Return a filename from a URL path or filename query parameter."""
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
     try:
-        if not path.exists():
-            return path
+        parsed = urlparse(raw)
     except Exception:
-        return path
+        return ""
+    try:
+        query = parse_qs(parsed.query or "")
+    except Exception:
+        query = {}
+    for key in ("filename", "download", "file", "name"):
+        values = query.get(key) or []
+        if values and str(values[0] or "").strip():
+            return unquote(str(values[0]).strip())
+    name = unquote((parsed.path or "").replace("\\", "/").rsplit("/", 1)[-1])
+    if "?" in name:
+        name = name.split("?", 1)[0]
+    return name.strip()
+
+
+def filename_from_content_disposition(header: Any) -> str:
+    """Return the filename from a Content-Disposition header, or ''."""
+    match = _CONTENT_DISPOSITION_FILENAME_RE.search(str(header or ""))
+    if not match:
+        return ""
+    raw = (match.group(1) or match.group(2) or "").strip().strip('"')
+    return unquote(raw)
+
+
+def require_existing_file(path: str | Path) -> Path:
+    """Return a path that exists as a file, or raise FileNotFoundError."""
+    candidate = Path(path).expanduser()
+    if not candidate.is_file():
+        raise FileNotFoundError(f"File not found: {path}")
+    return candidate
+
+
+def normalize_remote_path(value: Any, *, default: str = "/") -> str:
+    """Normalize a remote filesystem path. Scheme URLs contribute only their path."""
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        text = str(default or "/")
+    elif "://" in text:
+        try:
+            text = unquote(urlparse(text).path or "/") or str(default or "/")
+        except Exception:
+            text = str(default or "/")
+    elif not text.startswith("/"):
+        text = posixpath.join(str(default or "/"), text)
+    normalized = "/" + posixpath.normpath(text).lstrip("/")
+    return normalized or "/"
+
+
+def join_remote_path(parent: Any, child: Any, base_path: str = "/") -> str:
+    left = normalize_remote_path(parent, default=base_path)
+    right = str(child or "").strip().replace("\\", "/")
+    if not right:
+        return left
+    return normalize_remote_path(posixpath.join(left, right), default="/")
+
+
+def unique_path(path: Path) -> Path:
+    """Return a unique path by appending " (n)" if needed.
+
+    The name is reserved with O_EXCL so two writers cannot pick the same path.
+    The reserved file is empty; callers that open it for write replace that placeholder.
+    """
     stem = path.stem or "download"
     suffix = path.suffix
     parent = path.parent
-    for counter in range(1, 10_000):
-        candidate = parent / f"{stem} ({counter}){suffix}"
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    for counter in range(0, 10_000):
+        candidate = path if counter == 0 else parent / f"{stem} ({counter}){suffix}"
         try:
-            if not candidate.exists():
-                return candidate
-        except Exception:
+            fd = os.open(os.fspath(candidate), flags)
+        except FileExistsError:
+            continue
+        except IsADirectoryError:
+            continue
+        except OSError:
+            return candidate
+        else:
+            os.close(fd)
             return candidate
     return parent / f"{stem} (copy){suffix}"
+
+
+def path_key(value: Any) -> str:
+    """Case- and separator-insensitive path identity for matching."""
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return ""
+    try:
+        return os.path.normcase(os.path.normpath(text))
+    except Exception:
+        return text.replace("/", "\\").lower() if os.name == "nt" else text
 
 
 _WINDOWS_RESERVED_NAMES = frozenset({

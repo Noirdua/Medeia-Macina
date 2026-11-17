@@ -92,7 +92,7 @@ class Delete_Url(Cmdlet):
                 log("Error: Invalid hash format")
                 return 1
 
-        from SYS.metadata import normalize_urls
+        from SYS.url_normalize import normalize_urls
 
         def _urls_from_arg(raw: Any) -> List[str]:
             if raw is None:

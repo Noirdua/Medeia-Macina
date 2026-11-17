@@ -507,13 +507,16 @@ class search_file(Cmdlet):
 
         try:
             results_list: List[Dict[str, Any]] = []
-            from SYS.result_table import Table
+            from SYS.rich_display import prepare_result_table
 
             table_title = f"Combined Search: {query}"
-            table = Table(table_title)._perseverance(True)
             table_type = "search"
-            table.set_table(table_type)
-            table.set_source_command("search-file", args_list)
+            table = prepare_result_table(
+                table_title,
+                table_type,
+                source_command="search-file",
+                source_args=args_list,
+            )
             self._apply_system_predicate_header(table, system_predicates)
 
             total_results = 0
@@ -743,15 +746,15 @@ class search_file(Cmdlet):
             table_meta = provider.get_table_metadata(query, search_filters)
             preserve_order = provider.preserve_order
 
-            table = Table(table_title)._perseverance(preserve_order)
-            table.set_table(table_type)
-            try:
-                table.set_table_metadata(table_meta)
-            except Exception:
-                pass
-
             source_cmd, source_args = provider.get_source_command(args_list)
-            table.set_source_command(source_cmd, source_args)
+            table = prepare_result_table(
+                table_title,
+                table_type,
+                perseverance=bool(preserve_order),
+                metadata=table_meta if isinstance(table_meta, dict) else None,
+                source_command=source_cmd,
+                source_args=source_args,
+            )
             self._apply_system_predicate_header(table, system_predicates)
 
             debug_panel(
@@ -1189,6 +1192,7 @@ class search_file(Cmdlet):
                     for h in hash_query:
                         resolved_backend_name: Optional[str] = None
                         resolved_backend = None
+                        resolved_meta: Any = None
 
                         for backend_name in backends_to_try:
                             backend, backend_registry_cache, _exc = get_preferred_store_backend(
@@ -1205,6 +1209,7 @@ class search_file(Cmdlet):
                                     continue
                                 resolved_backend_name = backend_name
                                 resolved_backend = backend
+                                resolved_meta = meta
                                 break
                             except Exception:
                                 continue
@@ -1217,11 +1222,7 @@ class search_file(Cmdlet):
 
                         path_str: Optional[str] = None
 
-                        meta_obj: Dict[str, Any] = {}
-                        try:
-                            meta_obj = resolved_backend.get_metadata(h) or {}
-                        except Exception:
-                            meta_obj = {}
+                        meta_obj: Dict[str, Any] = resolved_meta if isinstance(resolved_meta, dict) else {}
 
                         tags_list: List[str] = []
                         maybe_flat = meta_obj.get("tag")
@@ -1384,13 +1385,6 @@ class search_file(Cmdlet):
                             return 1
                         debug(f"[search-file] Requested backend '{backend_to_search}' not found")
                         return 1
-                    try:
-                        pass
-                    except Exception as exc:
-                        log(f"Backend '{backend_to_search}' not found: {exc}", file=sys.stderr)
-                        db.update_worker_status(worker_id, "error")
-                        return 1
-
                     if type(target_backend).search is BackendBase.search:
                         log(
                             f"Backend '{backend_to_search}' does not support searching",

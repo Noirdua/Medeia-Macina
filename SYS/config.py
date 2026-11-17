@@ -32,6 +32,25 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 _WAL_CHECKPOINT_TIMEOUT = 5.0  # seconds for WAL checkpoint connection
+_WAL_CHECKPOINT_INTERVAL = 30.0
+_LAST_WAL_CHECKPOINT = 0.0
+
+
+def _maybe_checkpoint_wal() -> None:
+    global _LAST_WAL_CHECKPOINT
+    now = time.monotonic()
+    if now - _LAST_WAL_CHECKPOINT < _WAL_CHECKPOINT_INTERVAL:
+        return
+    _LAST_WAL_CHECKPOINT = now
+    try:
+        try:
+            with sqlite3.connect(str(db.db_path), timeout=_WAL_CHECKPOINT_TIMEOUT) as _con:
+                _con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            with sqlite3.connect(str(db.db_path), timeout=_WAL_CHECKPOINT_TIMEOUT) as _con:
+                _con.execute("PRAGMA wal_checkpoint")
+    except Exception as exc:
+        log(f"Warning: WAL checkpoint failed: {exc}")
 
 _CONFIG_CACHE: Dict[str, Any] = {}
 _LAST_SAVED_CONFIG: Dict[str, Any] = {}
@@ -1453,18 +1472,7 @@ def save_config(config: Dict[str, Any]) -> int:
                 f"({changed_count} changed entries)"
             )
 
-            # Try to checkpoint WAL to ensure main DB file reflects latest state.
-            # Use a separate short-lived connection to perform the checkpoint so
-            # we don't contend with our main connection lock or active transactions.
-            try:
-                try:
-                    with sqlite3.connect(str(db.db_path), timeout=_WAL_CHECKPOINT_TIMEOUT) as _con:
-                        _con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                except Exception:
-                    with sqlite3.connect(str(db.db_path), timeout=_WAL_CHECKPOINT_TIMEOUT) as _con:
-                        _con.execute("PRAGMA wal_checkpoint")
-            except Exception as exc:
-                log(f"Warning: WAL checkpoint failed: {exc}")
+            _maybe_checkpoint_wal()
 
             # Forensics disabled: audit/logs/backups removed to keep save lean.
             break

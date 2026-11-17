@@ -243,7 +243,7 @@ def _parse_relationships_king_alts(
 
 def _get_url(result: Any, pipe_obj: models.PipeObject) -> List[str]:
     """Extract valid URLs from pipe object or result dict."""
-    from SYS.metadata import normalize_urls
+    from SYS.url_normalize import normalize_urls
 
     candidates: List[str] = []
 

@@ -10,8 +10,8 @@ import sys
 from SYS.logger import log
 from SYS.item_accessors import get_sha256_hex, get_store_name
 from PluginCore.registry import get_plugin
-from SYS.metadata import _derive_sidecar_path as find_sidecar
-from SYS.metadata import _read_sidecar_metadata as read_sidecar
+from SYS.sidecar import derive_sidecar_path as find_sidecar
+from SYS.sidecar import read_sidecar_metadata as read_sidecar
 
 from SYS import pipeline as ctx
 from .. import _shared as sh

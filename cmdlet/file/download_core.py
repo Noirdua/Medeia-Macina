@@ -503,15 +503,18 @@ class Download_File(Cmdlet):
             return 0
 
         try:
-            from SYS.result_table import Table
+            from SYS.rich_display import prepare_result_table
             from SYS import pipeline as pipeline_context
         except Exception:
             return None
 
         table_title = f"Scrape: {target_url}"
-        table = Table(table_title)._perseverance(True)
-        table.set_table(table_name)
-        table.set_source_command("download-file", base_args)
+        table = prepare_result_table(
+            table_title,
+            table_name,
+            source_command="download-file",
+            source_args=base_args,
+        )
 
         for row_item in rows:
             table.add_result(row_item)
@@ -566,7 +569,7 @@ class Download_File(Cmdlet):
                     and not a.startswith("-")
                 )
             ]
-            from SYS.metadata import normalize_urls as normalize_url_list  # lazy: avoids Cryptodome at startup
+            from SYS.url_normalize import normalize_urls as normalize_url_list
             raw_url = normalize_url_list(url_candidates)
             local_source_inputs: List[str] = []
             if not raw_url and isinstance(explicit_input, str) and self._path_looks_local(explicit_input):

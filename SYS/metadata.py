@@ -13,6 +13,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from PluginCore.registry import get_plugin
 from SYS.utils import sanitize_filename, unique_preserve_order, value_normalize
+from SYS.sidecar import (
+    derive_sidecar_path as _derive_sidecar_path,
+    is_sidecar_filename,
+    parse_sidecar_text,
+    read_sidecar_metadata as _read_sidecar_metadata,
+)
+from SYS.url_normalize import normalize_urls
 from SYS.yt_metadata import extract_ytdlp_tags
 
 try:  # Optional; used when available for richer metadata fetches
@@ -341,119 +348,6 @@ def imdb_tag(imdb_id: str, timeout: float = 10.0) -> Dict[str, Any]:
     result["tag"] = tags
     return result
 
-def normalize_urls(value: Any) -> List[str]:
-    """Normalize a URL field into a stable, deduplicated list.
-
-    Accepts:
-    - None
-    - a single URL string (optionally containing multiple URLs)
-    - a list/tuple/set of URL strings
-
-    This helper is used by cmdlets/stores/pipeline to keep `url` consistent.
-    """
-
-    def _iter_raw_urls(raw: Any) -> Iterable[str]:
-        if raw is None:
-            return
-
-        if isinstance(raw, str):
-            text = raw.strip()
-            if not text:
-                return
-
-            # Prefer extracting obvious URLs to avoid splitting inside query strings.
-            matches = re.findall(r"https?://[^\s,]+", text, flags=re.IGNORECASE)
-            if matches:
-                for m in matches:
-                    yield m
-                return
-
-            # Fallback: split on commas/whitespace.
-            for token in text.replace("\n",
-                                      " ").replace("\r",
-                                                   " ").replace(",",
-                                                                " ").split():
-                if token:
-                    t_low = token.lower()
-                    # Heuristic: only yield tokens that look like URLs or common address patterns.
-                    # This prevents plain tags (e.g. "tag1, tag2") from leaking into URL fields.
-                    is_p_url = t_low.startswith(("http://",
-                                                 "https://",
-                                                 "magnet:",
-                                                 "torrent:",
-                                                 "ytdl://",
-                                                 "tidal:",
-                                                 "data:",
-                                                 "ftp:",
-                                                 "sftp:",
-                                                 "alldebrid:",
-                                                 "alldebrid🧲"))
-                    is_struct_url = ("." in token and "/" in token
-                                     and not token.startswith((".",
-                                                               "/")))
-                    if is_p_url or is_struct_url:
-                        yield token
-            return
-
-        if isinstance(raw, (list, tuple, set)):
-            for item in raw:
-                if item is None:
-                    continue
-                if isinstance(item, str):
-                    if item.strip():
-                        yield item
-                else:
-                    text = str(item).strip()
-                    if text:
-                        yield text
-            return
-
-        # Last resort: string-coerce.
-        text = str(raw).strip()
-        if text:
-            yield text
-
-    def _canonicalize(url_text: str) -> Optional[str]:
-        u = str(url_text or "").strip()
-        if not u:
-            return None
-
-        # Trim common wrappers and trailing punctuation.
-        u = u.strip("<>\"' ")
-        u = u.rstrip(')].,;"')
-        if not u:
-            return None
-
-        # --- HEURISTIC FILTER ---
-        # Ensure it actually looks like a URL/identifier to avoid tag leakage.
-        # This prevents plain tags ("adam22", "10 books") from entering the URL list.
-        low = u.lower()
-        has_scheme = low.startswith((
-            "http://", "https://", "magnet:", "torrent:", "tidal:",
-            "hydrus:", "ytdl:", "soulseek:", "matrix:", "file:",
-            "alldebrid:", "alldebrid🧲"
-        ))
-        if not (has_scheme or "://" in low):
-            return None
-
-        # IMPORTANT: URLs can be case-sensitive in the path/query on some hosts
-        # (e.g., https://0x0.st/PzGY.webp). Do not lowercase or otherwise rewrite
-        # the URL here; preserve exact casing and percent-encoding.
-        return u
-
-    seen: Set[str] = set()
-    out: List[str] = []
-    for raw_url in _iter_raw_urls(value):
-        canonical = _canonicalize(raw_url)
-        if not canonical:
-            continue
-        if canonical in seen:
-            continue
-        seen.add(canonical)
-        out.append(canonical)
-
-    return out
-
 def _normalize_string_list(values: Optional[Iterable[Any]]) -> List[str]:
     if not values:
         return []
@@ -470,76 +364,6 @@ def _normalize_string_list(values: Optional[Iterable[Any]]) -> List[str]:
         seen.add(text)
         items.append(text)
     return items
-
-
-def _derive_sidecar_path(media_path: Path) -> Path:
-    """Return sidecar path (.tag)."""
-    try:
-        preferred = media_path.parent / (media_path.name + ".tag")
-    except ValueError:
-        preferred = media_path.with_name(media_path.name + ".tag")
-    return preferred
-
-
-def is_sidecar_filename(name: str) -> bool:
-    lower = str(name or "").strip().lower()
-    return lower.endswith(".tag") or lower.endswith(".metadata")
-
-
-def parse_sidecar_text(raw: str) -> tuple[Optional[str], List[str], List[str]]:
-    hash_value: Optional[str] = None
-    tags: List[str] = []
-    urls: List[str] = []
-    in_tags = False
-    saw_tags_section = False
-    for raw_line in str(raw or "").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        lower = line.lower()
-        if lower in {"[tags]", "[tag]"}:
-            in_tags = True
-            saw_tags_section = True
-            continue
-        if lower.startswith("[") and lower.endswith("]"):
-            in_tags = False
-            continue
-        if in_tags:
-            tags.append(line.lower())
-            continue
-        if lower.startswith("hash:"):
-            hash_value = line.split(":", 1)[1].strip() if ":" in line else ""
-        elif lower.startswith("url:"):
-            url_part = line.split(":", 1)[1].strip() if ":" in line else ""
-            if url_part:
-                for url_segment in url_part.split(","):
-                    for url_token in url_segment.split():
-                        url_clean = url_token.strip()
-                        if url_clean and url_clean not in urls:
-                            urls.append(url_clean)
-        elif saw_tags_section:
-            continue
-        else:
-            tags.append(line.lower())
-    return hash_value, tags, urls
-
-
-def _read_sidecar_metadata(
-    sidecar_path: Path,
-) -> tuple[Optional[str],
-           List[str],
-           List[str]]:  # pyright: ignore[reportUnusedFunction]
-    """Read hash, tags, and url from sidecar file.
-
-    Consolidated with read_tags_from_file - this extracts extra metadata (hash, url).
-    """
-    if not sidecar_path.exists():
-        return None, [], []
-    try:
-        raw = sidecar_path.read_text(encoding="utf-8")
-    except OSError:
-        return None, [], []
-    return parse_sidecar_text(raw)
 
 
 def rename(file_path: Path, tags: Iterable[str]) -> Optional[Path]:

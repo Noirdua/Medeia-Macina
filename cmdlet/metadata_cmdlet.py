@@ -126,11 +126,9 @@ class Metadata(Cmdlet):
                     extra[key] = payload
 
         try:
-            from PluginCore.registry import REGISTRY, import_plugin_module
+            from PluginCore.registry import import_plugin_module, plugin_class_attr_map
 
-            REGISTRY.discover()
-            for info in REGISTRY.iter_plugins():
-                _ingest(getattr(info.plugin_class, "METADATA_ACTIONS", None))
+            _ingest(plugin_class_attr_map("METADATA_ACTIONS"))
             if "auto" not in extra:
                 for mod_name in ("metadata_plus", "metadata_plugin"):
                     mod = import_plugin_module(mod_name)

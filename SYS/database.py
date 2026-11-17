@@ -165,6 +165,10 @@ class Database:
                 FOREIGN KEY(worker_id) REFERENCES workers(id)
             )
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_worker_stdout_worker_ts
+            ON worker_stdout(worker_id, timestamp)
+        """)
         
         self.conn.commit()
 
@@ -353,12 +357,26 @@ def _ensure_log_db_schema() -> None:
         pass
 
 
+def _open_log_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(
+        str(LOG_DB_PATH),
+        timeout=_DB_CONNECT_TIMEOUT,
+        check_same_thread=False,
+    )
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {_DB_BUSY_TIMEOUT_MS}")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.Error:
+        pass
+    return conn
+
+
 def _log_worker_loop() -> None:
-    """Background log writer using a temporary per-write connection with
-    small retry/backoff and a file fallback when writes fail repeatedly.
-    """
+    """Background log writer. One connection stays open for the thread."""
     _ensure_log_db_schema()
     global _LOG_WRITE_COUNT
+    conn: Optional[sqlite3.Connection] = None
     while True:
         item = _LOG_QUEUE.get()
         if item is _LOG_SENTINEL:
@@ -368,16 +386,10 @@ def _log_worker_loop() -> None:
             attempts = 0
             written = False
             while attempts < _LOG_WRITE_RETRY_MAX and not written:
-                conn = None
                 cur = None
                 try:
-                    conn = sqlite3.connect(str(LOG_DB_PATH), timeout=_DB_CONNECT_TIMEOUT)
-                    try:
-                        conn.execute(f"PRAGMA busy_timeout = {_DB_BUSY_TIMEOUT_MS}")
-                        conn.execute("PRAGMA journal_mode=WAL")
-                        conn.execute("PRAGMA synchronous=NORMAL")
-                    except sqlite3.Error:
-                        pass
+                    if conn is None:
+                        conn = _open_log_conn()
                     cur = conn.cursor()
                     cur.execute("INSERT INTO logs (level, module, message) VALUES (?, ?, ?)", (level, module, message))
                     conn.commit()
@@ -392,24 +404,30 @@ def _log_worker_loop() -> None:
                     written = True
                 except sqlite3.OperationalError as exc:
                     attempts += 1
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn = None
                     if 'locked' in str(exc).lower():
                         time.sleep(_LOG_WRITE_RETRY_BASE_DELAY * attempts)
                         continue
-                    # Non-lock operational errors: abort attempts
                     log(f"Warning: Failed to write log entry (operational): {exc}")
                     break
                 except Exception as exc:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn = None
                     log(f"Warning: Failed to write log entry: {exc}")
                     break
                 finally:
                     if cur is not None:
                         try:
                             cur.close()
-                        except Exception:
-                            pass
-                    if conn is not None:
-                        try:
-                            conn.close()
                         except Exception:
                             pass
             if not written:
@@ -442,6 +460,11 @@ def _log_worker_loop() -> None:
                     _tb.print_exc(file=_sys.stderr)
                 except Exception:
                     pass
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _ensure_log_thread() -> None:
@@ -866,6 +889,31 @@ def _worker_db_connect(timeout: float = _WORKER_DB_DEFAULT_TIMEOUT) -> sqlite3.C
     return conn
 
 
+_worker_conn: Optional[sqlite3.Connection] = None
+_worker_conn_lock = threading.Lock()
+_WORKER_STDOUT_KEEP = 1000
+
+
+def _reset_worker_conn() -> None:
+    global _worker_conn
+    conn = _worker_conn
+    _worker_conn = None
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def _worker_db_connection(timeout: float) -> sqlite3.Connection:
+    global _worker_conn
+    if _worker_conn is not None:
+        return _worker_conn
+    _worker_conn = _worker_db_connect(timeout=timeout)
+    return _worker_conn
+
+
 def _worker_db_execute(
     query: str,
     params: tuple = (),
@@ -875,36 +923,34 @@ def _worker_db_execute(
     retries: int = _WORKER_DB_DEFAULT_RETRIES,
 ) -> Any:
     attempts = 0
-    while True:
-        conn: Optional[sqlite3.Connection] = None
-        try:
-            conn = _worker_db_connect(timeout=timeout)
-            cursor = conn.cursor()
+    with _worker_conn_lock:
+        while True:
             try:
-                cursor.execute(query, params)
-                if fetch == "one":
-                    result = cursor.fetchone()
-                elif fetch == "all":
-                    result = cursor.fetchall()
-                else:
-                    result = cursor.rowcount
-                conn.commit()
-                return result
-            finally:
-                cursor.close()
-        except sqlite3.OperationalError as exc:
-            msg = str(exc).lower()
-            if "locked" in msg and attempts < retries:
-                attempts += 1
-                time.sleep(_WORKER_DB_RETRY_BASE_DELAY * attempts)
-                continue
-            raise
-        finally:
-            if conn is not None:
+                conn = _worker_db_connection(timeout)
+                cursor = conn.cursor()
                 try:
-                    conn.close()
-                except Exception:
-                    pass
+                    cursor.execute(query, params)
+                    if fetch == "one":
+                        result = cursor.fetchone()
+                    elif fetch == "all":
+                        result = cursor.fetchall()
+                    else:
+                        result = cursor.rowcount
+                    conn.commit()
+                    return result
+                finally:
+                    cursor.close()
+            except sqlite3.OperationalError as exc:
+                _reset_worker_conn()
+                msg = str(exc).lower()
+                if "locked" in msg and attempts < retries:
+                    attempts += 1
+                    time.sleep(_WORKER_DB_RETRY_BASE_DELAY * attempts)
+                    continue
+                raise
+            except sqlite3.Error:
+                _reset_worker_conn()
+                raise
 
 def insert_worker(worker_id: str, worker_type: str, title: str = "", description: str = "") -> bool:
     try:
@@ -949,6 +995,18 @@ def append_worker_stdout(worker_id: str, content: str, channel: str = 'stdout'):
         _worker_db_execute(
             "INSERT INTO worker_stdout (worker_id, channel, content) VALUES (?, ?, ?)",
             (worker_id, channel, content),
+        )
+        _worker_db_execute(
+            """
+            DELETE FROM worker_stdout
+            WHERE worker_id = ? AND rowid NOT IN (
+                SELECT rowid FROM worker_stdout
+                WHERE worker_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            )
+            """,
+            (worker_id, worker_id, _WORKER_STDOUT_KEEP),
         )
     except Exception as exc:
         logger.warning("Failed to append worker stdout for %s: %s", worker_id, exc)

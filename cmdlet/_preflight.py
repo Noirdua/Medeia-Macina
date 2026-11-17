@@ -54,27 +54,10 @@ def get_preferred_store_backend(
     store_registry: Any = None,
     suppress_debug: bool = True,
 ) -> Tuple[Optional[Any], Any, Optional[Exception]]:
-    """Prefer a targeted backend instance, then fall back to the reused registry."""
-    direct_exc: Optional[Exception] = None
-    try:
-        from PluginCore.backend_registry import get_backend_instance
-
-        backend = get_backend_instance(
-            config or {},
-            str(store_name or ""),
-            suppress_debug=suppress_debug,
-        )
-        if backend is not None:
-            return backend, store_registry, None
-    except Exception as exc:
-        direct_exc = exc
-
-    backend, registry, lookup_exc = get_store_backend(
+    """Resolve a store backend from the shared registry."""
+    return get_store_backend(
         config,
         store_name,
         store_registry=store_registry,
         suppress_debug=suppress_debug,
     )
-    if backend is not None:
-        return backend, registry, None
-    return None, registry, direct_exc or lookup_exc

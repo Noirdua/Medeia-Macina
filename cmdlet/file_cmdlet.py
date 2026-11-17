@@ -115,17 +115,9 @@ class File(Cmdlet):
     def _plugin_file_actions(cls) -> Dict[str, Dict[str, Any]]:
         extra: Dict[str, Dict[str, Any]] = {}
         try:
-            from PluginCore.registry import REGISTRY
+            from PluginCore.registry import plugin_class_attr_map
 
-            REGISTRY.discover()
-            for info in REGISTRY.iter_plugins():
-                spec = getattr(info.plugin_class, "FILE_ACTIONS", None) or {}
-                if not isinstance(spec, dict):
-                    continue
-                for name, payload in spec.items():
-                    key = str(name or "").strip().lower()
-                    if key and isinstance(payload, dict):
-                        extra[key] = payload
+            extra.update(plugin_class_attr_map("FILE_ACTIONS"))
         except Exception:
             return extra
         return extra

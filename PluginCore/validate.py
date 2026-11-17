@@ -47,6 +47,12 @@ _CMDLET_METHODS = {
     "add-note": ("set_note",),
     "set-note": ("set_note",),
     "delete-note": ("delete_note",),
+    "get-file": ("get_file",),
+    "get-metadata": ("get_metadata", "fetch_metadata"),
+    "add-relationship": ("add_relationship",),
+    "get-relationship": ("get_relationship", "get_relationships"),
+    "delete-relationship": ("delete_relationship",),
+    "auto-tag": ("auto_tag",),
 }
 
 
@@ -94,7 +100,8 @@ def _plugin_roots() -> Tuple[Path, ...]:
 def iter_plugin_entries() -> List[Tuple[str, Path]]:
     seen: set[str] = set()
     entries: List[Tuple[str, Path]] = []
-    for root in _plugin_roots():
+    roots = list(_plugin_roots())
+    for root in roots:
         try:
             children = sorted(root.iterdir(), key=lambda p: p.name.lower())
         except Exception:
@@ -114,6 +121,22 @@ def iter_plugin_entries() -> List[Tuple[str, Path]]:
             elif child.is_file() and child.suffix.lower() == ".py" and child.stem != "__init__":
                 seen.add(key)
                 entries.append((child.stem, child))
+    if entries:
+        return entries
+    try:
+        from PluginCore.source import _sibling_plugin_source
+
+        sibling = _sibling_plugin_source()
+    except Exception:
+        sibling = None
+    if sibling is None:
+        return entries
+    for name, path in _catalog_children(sibling):
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append((name, path))
     return entries
 
 
@@ -204,6 +227,13 @@ def _check_name(plugin_class: Type[Plugin], folder_name: str, report: PluginRepo
             )
 
 
+def _same_as_base(value: Any, method_name: str) -> bool:
+    base = getattr(Plugin, method_name, None)
+    func = getattr(value, "__func__", value)
+    base_func = getattr(base, "__func__", base)
+    return func is base_func
+
+
 def _has_cmdlet_method(plugin_class: Type[Plugin], methods: Sequence[str], instance: Any = None) -> bool:
     if any(_overrides(plugin_class, method) for method in methods):
         return True
@@ -212,11 +242,9 @@ def _has_cmdlet_method(plugin_class: Type[Plugin], methods: Sequence[str], insta
     for method in methods:
         try:
             value = getattr(instance, method)
-        except AttributeError:
-            value = None
         except Exception:
             value = None
-        if callable(value):
+        if callable(value) and not _same_as_base(value, method):
             return True
     return False
 
@@ -307,6 +335,76 @@ def _check_detail_fields(plugin_class: Type[Plugin], report: PluginReport) -> No
             return
 
 
+def _check_auto_stages(
+    plugin_class: Type[Plugin],
+    report: PluginReport,
+    instance: Any = None,
+) -> None:
+    stages = getattr(plugin_class, "TABLE_AUTO_STAGES", None) or {}
+    if not stages:
+        return
+    if not isinstance(stages, dict):
+        _issue(report, "warning", "auto_stage", "TABLE_AUTO_STAGES should be a dict")
+        return
+    names = {str(getattr(plugin_class, "PLUGIN_NAME", "") or "").strip().lower()}
+    names.add(plugin_class.__name__.strip().lower())
+    names.update(
+        str(alias).strip().lower()
+        for alias in (getattr(plugin_class, "PLUGIN_ALIASES", ()) or ())
+        if str(alias).strip()
+    )
+    names.discard("")
+    needs_download = False
+    for raw_key, cmds in stages.items():
+        key = str(raw_key or "").strip().lower()
+        prefix = key.split(".", 1)[0]
+        if names and prefix not in names and key not in names:
+            _issue(
+                report,
+                "warning",
+                "auto_stage",
+                f"TABLE_AUTO_STAGES key {raw_key!r} is not this plugin",
+            )
+        try:
+            cmd_list = [str(item).strip().lower() for item in (cmds or ())]
+        except Exception:
+            cmd_list = []
+        if any(cmd == "download-file" or cmd.endswith("download-file") for cmd in cmd_list):
+            needs_download = True
+    if needs_download and not _has_cmdlet_method(
+        plugin_class,
+        ("download", "download_url", "handle_url"),
+        instance,
+    ):
+        _issue(
+            report,
+            "warning",
+            "auto_stage",
+            "TABLE_AUTO_STAGES requests download-file but download is not implemented",
+        )
+
+
+def _catalog_children(path: Path) -> List[Tuple[str, Path]]:
+    if not path.is_dir() or (path / "__init__.py").is_file():
+        return []
+    children: List[Tuple[str, Path]] = []
+    try:
+        entries = sorted(path.iterdir(), key=lambda item: item.name.lower())
+    except Exception:
+        return []
+    for child in entries:
+        name = str(child.name or "").strip()
+        if not name or name.startswith(".") or name.startswith("_"):
+            continue
+        if name.lower() in {"readme.md", "readme.txt"}:
+            continue
+        if child.is_dir() and (child / "__init__.py").is_file():
+            children.append((child.name, child))
+        elif child.is_file() and child.suffix.lower() == ".py" and child.stem != "__init__":
+            children.append((child.stem, child))
+    return children
+
+
 def _check_url_decls(plugin_class: Type[Plugin], report: PluginReport) -> None:
     url = getattr(plugin_class, "URL", ())
     if url not in (None, ()) and not isinstance(url, (list, tuple, str)):
@@ -336,8 +434,10 @@ def _validate_plugin_class(
     except Exception as exc:
         _issue(report, "error", "init", f"Plugin() raised {type(exc).__name__}: {exc}")
         _check_cmdlets(plugin_class, report, owns_commands=owns_commands)
+        _check_auto_stages(plugin_class, report)
         return
     _check_cmdlets(plugin_class, report, instance, owns_commands=owns_commands)
+    _check_auto_stages(plugin_class, report, instance)
     try:
         ready = instance.validate()
     except Exception as exc:
@@ -496,8 +596,12 @@ def resolve_targets(names: Sequence[str] | None = None) -> List[Tuple[str, Path]
         candidate = Path(text).expanduser()
         try:
             if candidate.exists():
-                label = candidate.stem if candidate.is_file() else candidate.name
-                resolved.append((label, candidate.resolve()))
+                catalog = _catalog_children(candidate)
+                if catalog:
+                    resolved.extend(catalog)
+                else:
+                    label = candidate.stem if candidate.is_file() else candidate.name
+                    resolved.append((label, candidate.resolve()))
                 continue
         except Exception:
             pass
@@ -551,7 +655,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "names",
         nargs="*",
-        help="Plugin names or paths. Default: every discovered plugin folder.",
+        help="Plugin names, plugin paths, or a plugin-source directory. Default: installed plugins.",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Only print failures")
     args = parser.parse_args(list(argv) if argv is not None else None)

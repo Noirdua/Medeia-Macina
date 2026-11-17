@@ -5,9 +5,13 @@ Backends are discovered from their owning plugins and instantiated from config.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import inspect
+import json
+import threading
+from collections import OrderedDict
 from typing import Any, Dict, Optional, Type
 
 from SYS.logger import debug
@@ -21,10 +25,11 @@ _PLUGIN_DISCOVERED_CLASSES_CACHE: Dict[str, Optional[Type[BackendBase]]] = {}
 # Keyed by (backend_type, instance_key) where instance_key is the configured name
 # under config.plugin.<type>.<instance_key>.
 _FAILED_BACKEND_CACHE: Dict[tuple[str, str], str] = {}
-# Cache of registries keyed by config object id. The tuple holds a strong
-# reference to the config so the id cannot be reused while cached, which would
-# otherwise return a registry bound to a different (freed) config object.
-_REGISTRY_CACHE: Dict[int, tuple[Any, "BackendRegistry"]] = {}
+# Registries keyed by plugin-config fingerprint. load_config() deep-copies on
+# every read, so an id() key never hits. Content identity does.
+_REGISTRY_CACHE: "OrderedDict[str, BackendRegistry]" = OrderedDict()
+_REGISTRY_LOCK = threading.Lock()
+_MAX_REGISTRY_CACHE = 8
 
 
 def _normalize_backend_type(value: str) -> str:
@@ -199,19 +204,71 @@ def _build_kwargs(backend_cls: Type[BackendBase], instance_name: str, instance_c
     return kwargs
 
 
+def _plugin_config_fingerprint(config: Optional[Dict[str, Any]]) -> str:
+    plugin: Any = {}
+    if isinstance(config, dict):
+        raw = config.get("plugin")
+        if isinstance(raw, dict):
+            plugin = raw
+    try:
+        payload = json.dumps(plugin, sort_keys=True, default=str, separators=(",", ":"))
+    except Exception:
+        payload = repr(plugin)
+    return hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()
+
+
 class BackendRegistry:
+
+    def __new__(
+        cls,
+        config: Optional[Dict[str, Any]] = None,
+        suppress_debug: bool = False,
+    ) -> "BackendRegistry":
+        fingerprint = _plugin_config_fingerprint(config)
+        with _REGISTRY_LOCK:
+            cached = _REGISTRY_CACHE.get(fingerprint)
+            if cached is not None:
+                _REGISTRY_CACHE.move_to_end(fingerprint)
+                return cached
+            instance = super().__new__(cls)
+            instance._fingerprint = fingerprint
+            instance._initialized = False
+            instance._init_failed = False
+            instance._init_error: Optional[BaseException] = None
+            instance._init_lock = threading.Lock()
+            _REGISTRY_CACHE[fingerprint] = instance
+            while len(_REGISTRY_CACHE) > _MAX_REGISTRY_CACHE:
+                oldest_key, oldest = next(iter(_REGISTRY_CACHE.items()))
+                if oldest is instance:
+                    break
+                _REGISTRY_CACHE.pop(oldest_key, None)
+            return instance
 
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
         suppress_debug: bool = False,
     ) -> None:
-        self._config = config or {}
-        self._suppress_debug = suppress_debug
-        self._backends: Dict[str, BackendBase] = {}
-        self._backend_errors: Dict[str, str] = {}
-        self._backend_types: Dict[str, str] = {}
-        self._load_backends()
+        with self._init_lock:
+            if self._initialized:
+                return
+            if self._init_failed:
+                raise RuntimeError(str(self._init_error or "backend registry init failed"))
+            try:
+                self._config = config or {}
+                self._suppress_debug = suppress_debug
+                self._backends: Dict[str, BackendBase] = {}
+                self._backend_errors: Dict[str, str] = {}
+                self._backend_types: Dict[str, str] = {}
+                self._load_backends()
+                self._initialized = True
+            except Exception as exc:
+                self._init_failed = True
+                self._init_error = exc
+                with _REGISTRY_LOCK:
+                    if _REGISTRY_CACHE.get(self._fingerprint) is self:
+                        _REGISTRY_CACHE.pop(self._fingerprint, None)
+                raise
 
     def _load_backends(self) -> None:
         plugin_cfg = self._config.get("plugin")
@@ -382,8 +439,19 @@ class BackendRegistry:
             return False
 
 
+def remember_uploaded_url(config: Optional[Dict[str, Any]], pipe_obj: Any, url: str) -> bool:
+    """Attach an uploaded URL to a pipe object when it already has store and hash."""
+    if pipe_obj is None or not str(url or "").strip():
+        return False
+    try:
+        return get_or_create_registry(config, suppress_debug=True).try_add_url_for_pipe_object(pipe_obj, str(url))
+    except Exception:
+        return False
+
+
 def clear_registry_cache() -> None:
-    _REGISTRY_CACHE.clear()
+    with _REGISTRY_LOCK:
+        _REGISTRY_CACHE.clear()
 
 
 def get_or_create_registry(
@@ -391,13 +459,7 @@ def get_or_create_registry(
     *,
     suppress_debug: bool = True,
 ) -> BackendRegistry:
-    key = id(config) if config is not None else 0
-    cached = _REGISTRY_CACHE.get(key)
-    if cached is not None and cached[0] is config:
-        return cached[1]
-    registry = BackendRegistry(config or {}, suppress_debug=suppress_debug)
-    _REGISTRY_CACHE[key] = (config, registry)
-    return registry
+    return BackendRegistry(config or {}, suppress_debug=suppress_debug)
 
 
 def list_configured_backend_names(config: Optional[Dict[str, Any]]) -> list[str]:
@@ -445,76 +507,16 @@ def get_backend_instance(
     *,
     suppress_debug: bool = False,
 ) -> Optional[BackendBase]:
-    """Instantiate and return a single configured backend by name."""
+    """Return a configured backend by name, reusing the process registry."""
     if not backend_name:
         return None
-    desired = str(backend_name or "").strip().lower()
-
-    for section_name in ("plugin",):
-        section_cfg = (config or {}).get(section_name) or {}
-        if not isinstance(section_cfg, dict):
-            continue
-
-        for raw_backend_type, instances in section_cfg.items():
-            if not isinstance(instances, dict):
-                continue
-            backend_type = _normalize_backend_type(str(raw_backend_type))
-            backend_cls = _resolve_backend_class(backend_type)
-            if backend_cls is None:
-                continue
-
-            for instance_name, instance_cfg in instances.items():
-                candidate_alias = None
-                if isinstance(instance_cfg, dict):
-                    candidate_alias = instance_cfg.get("NAME") or instance_cfg.get("name")
-                candidate_alias = str(candidate_alias or instance_name).strip()
-                if candidate_alias.lower() != desired:
-                    continue
-                try:
-                    kwargs = _build_kwargs(backend_cls, str(instance_name), instance_cfg)
-                except Exception as exc:
-                    if not suppress_debug:
-                        debug(
-                            f"[BackendRegistry] Can't build kwargs for '{instance_name}' ({backend_type}/{section_name}): {exc}"
-                        )
-                    return None
-                try:
-                    for key in list(kwargs.keys()):
-                        if _normalize_config_key(key) in {"PATH", "LOCATION"}:
-                            kwargs[key] = str(expand_path(kwargs[key]))
-                except Exception:
-                    pass
-                try:
-                    return backend_cls(**kwargs)
-                except Exception as exc:
-                    if not suppress_debug:
-                        debug(f"[BackendRegistry] Failed to instantiate backend '{candidate_alias}': {exc}")
-                    return None
-
-            for instance_name, instance_cfg in instances.items():
-                try:
-                    kwargs = _build_kwargs(backend_cls, str(instance_name), instance_cfg)
-                except Exception:
-                    continue
-                alias = str(kwargs.get("NAME") or instance_name).strip()
-                if alias.lower() != desired:
-                    continue
-                try:
-                    for key in list(kwargs.keys()):
-                        if _normalize_config_key(key) in {"PATH", "LOCATION"}:
-                            kwargs[key] = str(expand_path(kwargs[key]))
-                except Exception:
-                    pass
-                try:
-                    return backend_cls(**kwargs)
-                except Exception as exc:
-                    if not suppress_debug:
-                        debug(f"[BackendRegistry] Failed to instantiate backend '{alias}': {exc}")
-                    return None
-
-    if not suppress_debug:
-        debug(f"[BackendRegistry] Backend '{backend_name}' not found in config")
-    return None
+    try:
+        registry = get_or_create_registry(config, suppress_debug=suppress_debug)
+        return registry[str(backend_name)]
+    except Exception as exc:
+        if not suppress_debug:
+            debug(f"[BackendRegistry] Backend '{backend_name}' not available: {exc}")
+        return None
 
 
 __all__ = [
@@ -522,4 +524,5 @@ __all__ = [
     "BackendRegistry",
     "get_backend_instance",
     "list_configured_backend_names",
+    "remember_uploaded_url",
 ]

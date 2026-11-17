@@ -31,6 +31,7 @@ _EXTERNAL_PLUGIN_ENV_VARS: tuple[str, ...] = ("MM_PLUGIN_PATH", "MEDEIA_PLUGIN_P
 # Plugin instance cache keyed by (name, config_fingerprint)
 _plugin_instance_cache: Dict[Tuple[str, str], Optional[Plugin]] = {}
 _plugin_cache_lock = __import__("threading").Lock()
+_validate_warned: set[str] = set()
 
 
 def _config_fingerprint(config: Optional[Dict[str, Any]], plugin_name: str = "") -> str:
@@ -147,9 +148,15 @@ class PluginInfo:
     module: str
     alias_names: Tuple[str, ...] = field(default_factory=tuple)
 
+    def _declares(self, *names: str) -> bool:
+        declared = self.supported_cmdlets
+        return any(name in declared for name in names)
+
     @property
     def supports_search(self) -> bool:
-        return _class_supports_method(self.plugin_class, "search", Plugin.search)
+        return self._declares("search-file") or _class_supports_method(
+            self.plugin_class, "search", Plugin.search
+        )
 
     @property
     def supports_upload(self) -> bool:
@@ -157,11 +164,14 @@ class PluginInfo:
             exposed = bool(getattr(self.plugin_class, "EXPOSE_AS_FILE_PROVIDER", True))
         except Exception:
             exposed = True
-        return exposed and _class_supports_method(self.plugin_class, "upload", Plugin.upload)
+        return exposed and (
+            self._declares("add-file")
+            or _class_supports_method(self.plugin_class, "upload", Plugin.upload)
+        )
 
     @property
     def supports_download(self) -> bool:
-        return (
+        return self._declares("download-file") or (
             _class_supports_method(self.plugin_class, "handle_url", Plugin.handle_url)
             or _class_supports_method(self.plugin_class, "download_url", Plugin.download_url)
             or _class_supports_method(self.plugin_class, "download", Plugin.download)
@@ -552,6 +562,21 @@ def register_plugin(
     )
 
 
+def plugin_class_attr_map(attr: str) -> Dict[str, Dict[str, Any]]:
+    """Collect a dict class attribute from every discovered plugin."""
+    extra: Dict[str, Dict[str, Any]] = {}
+    REGISTRY.discover()
+    for info in REGISTRY.iter_plugins():
+        spec = getattr(info.plugin_class, attr, None) or {}
+        if not isinstance(spec, dict):
+            continue
+        for name, payload in spec.items():
+            key = str(name or "").strip().lower()
+            if key and isinstance(payload, dict):
+                extra[key] = payload
+    return extra
+
+
 def get_plugin_class(name: str) -> Optional[Type[Plugin]]:
     raw_name = str(name or "").strip()
     if not raw_name or raw_name[:1] in {"[", "("} or "," in raw_name:
@@ -590,9 +615,11 @@ def get_plugin_capabilities(
         "resolve_pipe_result_download",
         Plugin.resolve_pipe_result_download,
     )
-    delete_method = getattr(info.plugin_class, "delete_file", None)
-    base_delete_method = getattr(Plugin, "delete_file", None)
-    supports_delete_file = callable(delete_method) and delete_method is not base_delete_method
+    supports_delete_file = "delete-file" in info.supported_cmdlets or _class_supports_method(
+        info.plugin_class,
+        "delete_file",
+        Plugin.delete_file,
+    )
 
     configured_instances: List[str] = []
     supports_url_association = False
@@ -604,6 +631,9 @@ def get_plugin_capabilities(
         supports_url_association = bool(getattr(plugin_obj, "supports_url_association", False))
         supports_note_association = bool(getattr(plugin_obj, "supports_note_association", False))
         supports_relationship_association = bool(getattr(plugin_obj, "supports_relationship_association", False))
+        if not supports_delete_file:
+            delete_method = getattr(plugin_obj, "delete_file", None)
+            supports_delete_file = callable(delete_method) and delete_method is not Plugin.delete_file
     except Exception:
         configured_instances = []
         supports_url_association = False
@@ -747,9 +777,27 @@ def get_plugin(name: str, config: Optional[Dict[str, Any]] = None) -> Optional[P
         except Exception:
             pass
         if not plugin.validate():
-            debug(f"[plugin] Plugin '{name}' is not available")
             # Do not cache negative validate results — config/instances may become
             # valid later in the same session (e.g. after .config edits).
+            warn_key = str(name or "").strip().lower()
+            if warn_key not in _validate_warned:
+                _validate_warned.add(warn_key)
+                missing: List[str] = []
+                try:
+                    missing = [
+                        str(field.get("key") or "").strip()
+                        for field in (plugin.missing_required_config() or [])
+                        if str(field.get("key") or "").strip()
+                    ]
+                except Exception:
+                    missing = []
+                if missing:
+                    log(
+                        f"Plugin '{name}' is not configured. Set {', '.join(missing)} in .config",
+                        file=sys.stderr,
+                    )
+                else:
+                    debug(f"[plugin] Plugin '{name}' is not available")
             return None
         with _plugin_cache_lock:
             _plugin_instance_cache[cache_key] = plugin
@@ -852,6 +900,40 @@ def list_plugin_names_for_cmdlet(
     )
 
 
+def _score_url_pattern(raw_url_lower: str, host_norm: str, pattern: str) -> int:
+    dom = str(pattern or "").strip().lower()
+    if not dom:
+        return 0
+    if "://" in dom or dom.startswith("magnet:") or dom.endswith(":") or "🧲" in dom:
+        if raw_url_lower.startswith(dom):
+            return 2000 + len(dom)
+        return 0
+    dom_norm = dom[4:] if dom.startswith("www.") else dom
+    if not dom_norm or not host_norm:
+        return 0
+    if host_norm == dom_norm:
+        return 1000 + len(dom_norm)
+    if host_norm.endswith("." + dom_norm):
+        return 500 + len(dom_norm)
+    return 0
+
+
+def _prefer_url_owner(candidates: Sequence["PluginInfo"]) -> "PluginInfo":
+    def _is_child(info: "PluginInfo") -> bool:
+        for other in candidates:
+            if other is info or other.plugin_class is info.plugin_class:
+                continue
+            try:
+                if issubclass(info.plugin_class, other.plugin_class):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    parents = [info for info in candidates if not _is_child(info)]
+    return (parents or list(candidates))[0]
+
+
 def match_plugin_name_for_url(url: str) -> Optional[str]:
     raw_url = str(url or "").strip()
     raw_url_lower = raw_url.lower()
@@ -895,27 +977,18 @@ def match_plugin_name_for_url(url: str) -> Optional[str]:
                 return "openlibrary" if REGISTRY.has_name("openlibrary") else None
             return "internetarchive" if REGISTRY.has_name("internetarchive") else None
 
+    scored: List[tuple[int, PluginInfo]] = []
     for info in REGISTRY.iter_plugins():
-        domains = _plugin_url_patterns(info.plugin_class)
-        if not domains:
-            continue
-        for domain in domains:
-            dom_raw = str(domain or "").strip()
-            dom = dom_raw.lower()
-            if not dom:
-                continue
-            if "://" in dom or dom.startswith("magnet:") or dom.endswith(":") or "🧲" in dom:
-                if raw_url_lower.startswith(dom):
-                    return info.canonical_name
-                continue
-
-            dom_norm = _norm_host(dom)
-            if not dom_norm or not host_norm:
-                continue
-            if host_norm == dom_norm or host_norm.endswith("." + dom_norm):
-                return info.canonical_name
-
-    return None
+        best = 0
+        for pattern in _plugin_url_patterns(info.plugin_class):
+            best = max(best, _score_url_pattern(raw_url_lower, host_norm, str(pattern or "")))
+        if best:
+            scored.append((best, info))
+    if not scored:
+        return None
+    top = max(score for score, _info in scored)
+    contenders = [info for score, info in scored if score == top]
+    return _prefer_url_owner(contenders).canonical_name
 
 
 def plugin_inline_query_choices(
@@ -1050,6 +1123,7 @@ def resolve_inline_filters(
 def clear_plugin_cache() -> None:
     """Clear the plugin instance cache. Useful for testing or config reloads."""
     global _plugin_instance_cache
+    _validate_warned.clear()
     with _plugin_cache_lock:
         _plugin_instance_cache.clear()
     try:

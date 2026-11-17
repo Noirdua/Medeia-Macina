@@ -358,6 +358,7 @@ def _enrich_duplicate_metadata(
             if title_text and title_text != generic_title:
                 result.setdefault("title", title_text)
 
+    fetched_metadata = False
     if not result:
         getter = getattr(backend, "get_metadata", None)
         if callable(getter):
@@ -365,11 +366,12 @@ def _enrich_duplicate_metadata(
                 payload = getter(file_hash)
             except Exception:
                 payload = None
+            fetched_metadata = True
             if isinstance(payload, dict):
                 result = dict(payload)
 
     getter = getattr(backend, "get_metadata", None)
-    if callable(getter) and not cls._has_duplicate_title(result):
+    if callable(getter) and not fetched_metadata and not cls._has_duplicate_title(result):
         try:
             getter_payload = getter(file_hash)
         except Exception:

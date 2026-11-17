@@ -21,7 +21,6 @@ from SYS.item_accessors import get_extension_field, get_int_field, get_result_ti
 from SYS.logger import log
 from SYS.payload_builders import build_file_result_payload
 from SYS.result_publication import publish_result_table
-from SYS.result_table import Table
 from PluginCore.backend_registry import BackendRegistry
 from SYS import pipeline as ctx
 
@@ -369,7 +368,7 @@ class Get_Url(Cmdlet):
                                 if not self._match_url_pattern(str(url), raw_pattern):
                                     continue
 
-                                from SYS.metadata import normalize_urls
+                                from SYS.url_normalize import normalize_urls
                                 valid = normalize_urls([str(url)])
                                 if not valid:
                                     continue
@@ -446,13 +445,16 @@ class Get_Url(Cmdlet):
             # `columns` list to force display order and size formatting.
             display_items: List[Dict[str, Any]] = []
 
-            table = (
-                Table(
-                    "url",
-                    max_columns=5
-                )._perseverance(True).set_table("url").set_value_case("preserve")
+            from SYS.rich_display import prepare_result_table
+
+            table = prepare_result_table(
+                "url",
+                "url",
+                max_columns=5,
+                value_case="preserve",
+                source_command="get-url",
+                source_args=["-url", search_pattern],
             )
-            table.set_source_command("get-url", ["-url", search_pattern])
 
             for item in items:
                 payload = build_file_result_payload(
@@ -514,7 +516,7 @@ class Get_Url(Cmdlet):
             urls = backend.get_url(file_hash)
             
             # Filter URLs to avoid data leakage from dirty DBs
-            from SYS.metadata import normalize_urls
+            from SYS.url_normalize import normalize_urls
             urls = normalize_urls(urls)
 
             # Prepare metadata for the detail view

@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import os
 import sys
-from typing import Any, Iterator, TextIO, List, Dict, Optional, Tuple, cast
+from typing import Any, Dict, Iterator, List, Optional, TextIO, Tuple, cast
 
 from pathlib import Path
 from SYS.utils import expand_path
@@ -92,6 +92,99 @@ def _ensure_consoles() -> None:
             pass
         _STDOUT_CONSOLE = Console(file=sys.stdout, **console_kwargs)
         _STDERR_CONSOLE = Console(file=sys.stderr, **console_kwargs)
+
+
+def prepare_result_table(
+    title: str,
+    table_name: str = "",
+    *,
+    perseverance: bool = True,
+    metadata: Optional[Dict[str, Any]] = None,
+    source_command: Optional[str] = None,
+    source_args: Optional[List[str]] = None,
+    value_case: Optional[str] = None,
+    max_columns: Optional[int] = None,
+) -> Any:
+    """Build a selector table with the usual metadata and source command."""
+    from SYS.result_table import Table
+
+    table = Table(title, max_columns=max_columns)._perseverance(perseverance)
+    if table_name:
+        table.set_table(table_name)
+    if metadata:
+        try:
+            table.set_table_metadata(metadata)
+        except Exception:
+            pass
+    if value_case:
+        try:
+            table.set_value_case(value_case)
+        except Exception:
+            pass
+    if source_command:
+        table.set_source_command(source_command, list(source_args or []))
+    return table
+
+
+def result_payload(row: Any, *, table: str = "") -> Dict[str, Any]:
+    """Serialize a result row. Falls back to table/title/path if to_dict fails."""
+    try:
+        payload = row.to_dict()
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    if isinstance(row, dict):
+        return dict(row)
+    payload: Dict[str, Any] = {
+        "table": str(getattr(row, "table", "") or table or ""),
+        "title": str(getattr(row, "title", "") or ""),
+        "path": str(getattr(row, "path", "") or ""),
+    }
+    meta = getattr(row, "full_metadata", None)
+    if meta is not None:
+        payload["full_metadata"] = meta
+    return payload
+
+
+def add_result_rows(table: Any, rows: Any, *, fallback_table: str = "") -> List[Dict[str, Any]]:
+    payloads: List[Dict[str, Any]] = []
+    for row in rows or []:
+        table.add_result(row)
+        payloads.append(result_payload(row, table=fallback_table))
+    return payloads
+
+
+def publish_result_table(
+    ctx: Any,
+    table: Any,
+    payloads: Any,
+    *,
+    subject: Any = None,
+    honor_suppress: bool = False,
+) -> None:
+    """Store a selector table and print it. Failures stay local to the caller."""
+    try:
+        if subject is None:
+            ctx.set_last_result_table(table, payloads)
+        else:
+            ctx.set_last_result_table(table, payloads, subject=subject)
+        setter = getattr(ctx, "set_current_stage_table", None)
+        if callable(setter):
+            setter(table)
+    except Exception:
+        pass
+    if honor_suppress:
+        try:
+            if bool(getattr(ctx, "_suppress_provider_selector_print", False)):
+                return
+        except Exception:
+            pass
+    try:
+        stdout_console().print()
+        stdout_console().print(table)
+    except Exception:
+        pass
 
 
 def stdout_console() -> Any:

@@ -31,20 +31,22 @@ def _matches_target(
     target_path: str | None,
     target_store: str | None = None,
 ) -> bool:
+    from SYS.utils import path_key
+
     def norm(val: Any) -> str | None:
         return str(val).lower() if val is not None else None
 
     target_hash_l = target_hash.lower() if target_hash else None
-    target_path_l = target_path.lower() if target_path else None
+    target_path_l = path_key(target_path) if target_path else None
     target_store_l = target_store.lower() if target_store else None
 
     if isinstance(item, dict):
         hashes = [norm(item.get("hash"))]
-        paths = [norm(item.get("path")), norm(item.get("target"))]
+        paths = [path_key(item.get("path")), path_key(item.get("target"))]
         stores = [norm(item.get("store"))]
     else:
         hashes = [norm(get_field(item, "hash"))]
-        paths = [norm(get_field(item, "path")), norm(get_field(item, "target"))]
+        paths = [path_key(get_field(item, "path")), path_key(get_field(item, "target"))]
         stores = [norm(get_field(item, "store"))]
 
     if target_store_l and target_store_l not in stores:

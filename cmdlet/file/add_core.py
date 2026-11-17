@@ -507,7 +507,7 @@ class Add_File(Cmdlet):
 
             if source_url_arg:
                 try:
-                    from SYS.metadata import normalize_urls
+                    from SYS.url_normalize import normalize_urls
 
                     cli_urls = [u.strip() for u in str(source_url_arg).split(",") if u and u.strip()]
                     merged_urls: List[str] = []

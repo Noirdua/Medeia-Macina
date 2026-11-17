@@ -95,7 +95,33 @@ _EXT_TO_SCRAPE_TYPE: Dict[str, str] = {
 _SCRAPE_MAX_ASSETS = 500
 _SCRAPE_MAX_BYTES = 2_500_000
 _SCRAPE_CACHE_TTL = 30.0
+_SCRAPE_CACHE_MAX = 64
 _SCRAPE_CACHE: Dict[str, tuple[float, List[Dict[str, str]]]] = {}
+
+
+def _scrape_cache_get(target: str) -> Optional[List[Dict[str, str]]]:
+    cached = _SCRAPE_CACHE.get(target)
+    if cached is None:
+        return None
+    cached_at, assets = cached
+    if time.monotonic() - cached_at > _SCRAPE_CACHE_TTL:
+        _SCRAPE_CACHE.pop(target, None)
+        return None
+    return assets
+
+
+def _scrape_cache_put(target: str, assets: List[Dict[str, str]]) -> None:
+    now = time.monotonic()
+    expired = [
+        key
+        for key, (cached_at, _assets) in _SCRAPE_CACHE.items()
+        if now - cached_at > _SCRAPE_CACHE_TTL
+    ]
+    for key in expired:
+        _SCRAPE_CACHE.pop(key, None)
+    _SCRAPE_CACHE[target] = (now, assets)
+    while len(_SCRAPE_CACHE) > _SCRAPE_CACHE_MAX:
+        _SCRAPE_CACHE.pop(next(iter(_SCRAPE_CACHE)))
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _DDG_RESULT_ANCHOR_RE = re.compile(
     r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
@@ -963,11 +989,9 @@ def _scrape_page(page_url: str, *, timeout: float = 12.0) -> tuple[str, List[Dic
         debug("Page scrape blocked host", {"url": target, "host": host})
         return "error", []
 
-    cached = _SCRAPE_CACHE.get(target)
+    cached = _scrape_cache_get(target)
     if cached is not None:
-        cached_at, assets = cached
-        if time.monotonic() - cached_at <= _SCRAPE_CACHE_TTL:
-            return "html", assets
+        return "html", cached
 
     from API.HTTP import get_page_session
 
@@ -1036,7 +1060,7 @@ def _scrape_page(page_url: str, *, timeout: float = 12.0) -> tuple[str, List[Dic
         return "error", []
 
     assets = _extract_html_assets(html_text, final_url)
-    _SCRAPE_CACHE[target] = (time.monotonic(), assets)
+    _scrape_cache_put(target, assets)
     return "html", assets
 
 

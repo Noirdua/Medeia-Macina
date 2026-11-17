@@ -105,37 +105,48 @@ def _run(result: Any, _args: Sequence[str], config: Dict[str, Any]) -> int:
         log('get-relationship requires -query "hash:<sha256>"', file=sys.stderr)
         return 1
 
-    # Fetch Hydrus relationships if we have a hash.
-    hydrus_provider = get_plugin("hydrusnetwork", config)
+    relationship_source = None
+    store_label = str(store_name or "hydrus")
+    if store_name:
+        try:
+            from cmdlet._preflight import get_store_backend
 
-    hash_hex = (
-        normalize_hash(override_hash)
-        if override_hash else normalize_hash(get_hash_for_operation(None,
-                                                                    result))
-    )
+            backend, _registry, _exc = get_store_backend(
+                config,
+                store_name,
+                suppress_debug=True,
+            )
+            if backend is not None and callable(getattr(backend, "get_relationships", None)):
+                relationship_source = backend
+        except Exception:
+            relationship_source = None
+    if relationship_source is None:
+        relationship_source = get_plugin("hydrusnetwork", config)
 
     if hash_hex:
         try:
-            store_label = "hydrus"
-            if store_name:
-                store_label = str(store_name)
-                if hydrus_provider is None:
+            if relationship_source is None:
+                if store_name:
                     log(
-                        f"Hydrus client unavailable for store '{store_name}'",
-                        file=sys.stderr
+                        f"No relationship store available for '{store_name}'",
+                        file=sys.stderr,
                     )
                     return 1
-                relationships = hydrus_provider.get_relationships(hash_hex, store_name=store_name)
+                relationships = None
             else:
-                relationships = hydrus_provider.get_relationships(hash_hex) if hydrus_provider is not None else None
+                getter = relationship_source.get_relationships
+                try:
+                    relationships = getter(hash_hex, store_name=store_name) if store_name else getter(hash_hex)
+                except TypeError:
+                    relationships = getter(hash_hex)
 
             def _resolve_related_title(rel_hash: str) -> str:
                 h = normalize_hash(rel_hash)
                 if not h:
                     return str(rel_hash)
-                if hydrus_provider is not None:
+                if relationship_source is not None:
                     try:
-                        resolved_title = hydrus_provider.get_title(
+                        resolved_title = relationship_source.get_title(
                             h,
                             store_name=store_label if store_name else None,
                         )

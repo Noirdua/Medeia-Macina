@@ -1520,5 +1520,5 @@ def extract_url_from_result(result: Any) -> list[str]:
             _extend(fm.get("source_url"))
             _extend(fm.get("webpage_url"))
 
-    from SYS.metadata import normalize_urls
+    from SYS.url_normalize import normalize_urls
     return normalize_urls(url)

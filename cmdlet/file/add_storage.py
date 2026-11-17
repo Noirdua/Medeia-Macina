@@ -626,7 +626,7 @@ def _handle_storage_backend(
         )
 
         try:
-            from SYS.metadata import normalize_urls
+            from SYS.url_normalize import normalize_urls
 
             source_store = None
             source_hash = None

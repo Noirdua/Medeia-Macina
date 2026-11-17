@@ -8,6 +8,7 @@ Provides synchronous HTTP operations with:
 - Request/response logging support
 """
 
+import atexit
 import httpx
 import sys
 import time
@@ -17,12 +18,19 @@ import os
 import json
 from typing import Optional, Dict, Any, Callable, List, Union
 from pathlib import Path
-from urllib.parse import unquote, urlparse, parse_qs
+from urllib.parse import urlparse
 import logging
 
 from SYS.logger import debug, debug_panel, is_debug_enabled, log
 from SYS.models import DebugLogger, DownloadError, DownloadMediaResult, ProgressBar
-from SYS.utils import ensure_directory, sha256_file, sanitize_filename as _sanitize_filename_base, unique_path as _unique_path
+from SYS.utils import (
+    ensure_directory,
+    filename_from_content_disposition,
+    filename_from_url,
+    sha256_file,
+    sanitize_filename as _sanitize_filename_base,
+    unique_path as _unique_path,
+)
 
 try:  # Optional; used for metadata extraction when available
     from SYS.yt_metadata import extract_ytdlp_tags
@@ -41,11 +49,12 @@ def _redact_url(url: str) -> str:
     return _URL_CREDENTIAL_RE.sub(r"://***:***@", str(url or ""))
 
 
+def _retry_pause(attempt: int) -> None:
+    time.sleep(min(2 ** max(int(attempt), 0), 8))
+
+
 # Default configuration
 DEFAULT_TIMEOUT = 30.0
-_CONTENT_DISPOSITION_FILENAME_RE = re.compile(
-    r'filename\*?=(?:"([^"]*)"|([^;\s]*))'
-)
 DEFAULT_RETRIES = 3
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
@@ -505,6 +514,7 @@ class HTTPClient:
             except httpx.TimeoutException as e:
                 last_exception = e
                 if attempt < self.retries - 1:
+                    _retry_pause(attempt)
                     continue
             except httpx.HTTPStatusError as e:
                 # Don't retry on 4xx errors
@@ -527,62 +537,21 @@ class HTTPClient:
                     f"HTTP {e.response.status_code} on attempt {attempt + 1}/{self.retries}: {_redact_url(url)} - {response_text}"
                 )
                 if attempt < self.retries - 1:
+                    _retry_pause(attempt)
                     continue
             except (httpx.RequestError, httpx.ConnectError) as e:
                 last_exception = e
                 logger.warning(
                     f"Connection error on attempt {attempt + 1}/{self.retries}: {_redact_url(url)} - {e}"
                 )
-
-                # Detect certificate verification failures in the underlying error
-                msg = str(e or "").lower()
-                if ("certificate verify failed" in msg or "unable to get local issuer certificate" in msg):
-                    logger.info("Certificate verification failed; attempting to retry with a system-aware CA bundle")
-                    try:
-                        temp_client = get_shared_httpx_client(
-                            timeout=self.timeout,
-                            verify_ssl=self._httpx_verify,
-                            headers=self._get_headers(),
-                        )
-                        try:
-                            response = temp_client.request(method, url, **kwargs)
-                            if raise_for_status:
-                                response.raise_for_status()
-                            return response
-                        except Exception as e2:
-                            last_exception = e2
-                    except Exception:
-                        # certifi/pip-system-certs/httpx not available; fall back to existing retry behavior
-                        pass
-
                 if attempt < self.retries - 1:
+                    _retry_pause(attempt)
                     continue
             except Exception as e:
-                # Catch-all to handle non-httpx exceptions that may represent
-                # certificate verification failures from underlying transports.
                 last_exception = e
                 logger.warning(f"Request exception on attempt {attempt + 1}/{self.retries}: {_redact_url(url)} - {e}")
-                msg = str(e or "").lower()
-                if ("certificate verify failed" in msg or "unable to get local issuer certificate" in msg):
-                    logger.info("Certificate verification failed; attempting to retry with a system-aware CA bundle")
-                    try:
-                        temp_client = get_shared_httpx_client(
-                            timeout=self.timeout,
-                            verify_ssl=self._httpx_verify,
-                            headers=self._get_headers(),
-                        )
-                        try:
-                            response = temp_client.request(method, url, **kwargs)
-                            if raise_for_status:
-                                response.raise_for_status()
-                            return response
-                        except Exception as e2:
-                            last_exception = e2
-                    except Exception:
-                        # certifi/pip-system-certs/httpx not available; fall back to existing retry behavior
-                        pass
-
                 if attempt < self.retries - 1:
+                    _retry_pause(attempt)
                     continue
 
         if last_exception:
@@ -660,47 +629,33 @@ def download_direct_file(
         text = text.replace("\\", "/").split("/")[-1]
         return _sanitize_filename_base(text, fallback="")
 
-    parsed_url = urlparse(url)
-    url_path = parsed_url.path
-
-    filename: Optional[str] = None
-    if parsed_url.query:
-        query_params = parse_qs(parsed_url.query)
-        for param_name in ("filename", "download", "file", "name"):
-            if param_name in query_params and query_params[param_name]:
-                filename = query_params[param_name][0]
-                filename = unquote(filename)
-                break
-
-    if not filename or not filename.strip():
-        filename = url_path.split("/")[-1] if url_path else ""
-        filename = unquote(filename)
-
-    if "?" in filename:
-        filename = filename.split("?")[0]
+    filename = filename_from_url(url)
 
     content_type = ""
+    page_like_exts = {".php", ".asp", ".aspx", ".jsp", ".cgi"}
     try:
-        with HTTPClient(timeout=10.0) as client:
-            response = client._request("HEAD", url, follow_redirects=True)
-            content_disposition = response.headers.get("content-disposition", "")
-            try:
-                content_type = str(response.headers.get("content-type", "") or "").strip().lower()
-            except Exception:
-                content_type = ""
+        preliminary_ext = Path(str(filename or "")).suffix.lower()
+    except Exception:
+        preliminary_ext = ""
+    known_file = bool(preliminary_ext and preliminary_ext not in page_like_exts)
+    if not known_file:
+        try:
+            with HTTPClient(timeout=10.0) as client:
+                response = client._request("HEAD", url, follow_redirects=True)
+                content_disposition = response.headers.get("content-disposition", "")
+                try:
+                    content_type = str(response.headers.get("content-type", "") or "").strip().lower()
+                except Exception:
+                    content_type = ""
 
-            if content_disposition:
-                match = _CONTENT_DISPOSITION_FILENAME_RE.search(content_disposition)
-                if match:
-                    extracted_name = match.group(1) or match.group(2)
-                    if extracted_name:
-                        filename = unquote(extracted_name)
-    except Exception as exc:
-        if not quiet:
-            log(f"Could not get filename from headers: {exc}", file=sys.stderr)
+                extracted_name = filename_from_content_disposition(content_disposition)
+                if extracted_name:
+                    filename = extracted_name
+        except Exception as exc:
+            if not quiet:
+                log(f"Could not get filename from headers: {exc}", file=sys.stderr)
 
     try:
-        page_like_exts = {".php", ".asp", ".aspx", ".jsp", ".cgi"}
         ext = ""
         try:
             ext = Path(str(filename or "")).suffix.lower()
@@ -708,13 +663,21 @@ def download_direct_file(
             ext = ""
 
         ct0 = (content_type or "").split(";", 1)[0].strip().lower()
-        # Probe when the content-type is unknown too, so HTML viewer pages are
-        # refused instead of being saved as files.
-        must_probe = bool(ct0.startswith("text/html") or ext in page_like_exts or not ct0)
+        # A known file extension does not need a second request just to learn the type.
+        must_probe = bool(
+            ct0.startswith("text/html")
+            or ext in page_like_exts
+            or (not ct0 and not known_file)
+        )
 
         if must_probe:
             with HTTPClient(timeout=10.0) as client:
-                with client._request_stream("GET", url, follow_redirects=True) as resp:
+                with client._request_stream(
+                    "GET",
+                    url,
+                    follow_redirects=True,
+                    headers={"Range": "bytes=0-1023"},
+                ) as resp:
                     resp.raise_for_status()
                     ct = (
                         str(resp.headers.get("content-type", "") or "")
@@ -1085,6 +1048,21 @@ class PageSession:
         return self.request("HEAD", url, **kwargs)
 
 
+_PAGE_SESSIONS: List[PageSession] = []
+_PAGE_SESSION_LOCK = __import__("threading").Lock()
+
+
+def close_page_sessions() -> None:
+    with _PAGE_SESSION_LOCK:
+        sessions = list(_PAGE_SESSIONS)
+        _PAGE_SESSIONS.clear()
+    for session in sessions:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 def get_page_session() -> PageSession:
     import threading
 
@@ -1095,8 +1073,13 @@ def get_page_session() -> PageSession:
     session = getattr(local, "session", None)
     if session is None:
         session = PageSession()
+        with _PAGE_SESSION_LOCK:
+            _PAGE_SESSIONS.append(session)
         local.session = session
     return session
+
+
+atexit.register(close_page_sessions)
 
 
 def upload_with_content_length(

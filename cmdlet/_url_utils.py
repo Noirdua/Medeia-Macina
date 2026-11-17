@@ -33,7 +33,7 @@ __all__ = [
 
 def merge_urls(existing: Any, incoming: Sequence[Any]) -> list[str]:
     """Merge URL values into a normalized, de-duplicated list."""
-    from SYS.metadata import normalize_urls
+    from SYS.url_normalize import normalize_urls
 
     merged: list[str] = []
     for value in normalize_urls(existing):
@@ -47,7 +47,7 @@ def merge_urls(existing: Any, incoming: Sequence[Any]) -> list[str]:
 
 def remove_urls(existing: Any, remove: Sequence[Any]) -> list[str]:
     """Remove URL values from an existing URL field and return survivors."""
-    from SYS.metadata import normalize_urls
+    from SYS.url_normalize import normalize_urls
 
     current = normalize_urls(existing)
     remove_set = {value for value in normalize_urls(list(remove or [])) if value}
@@ -191,7 +191,7 @@ def check_url_exists_in_storage(
         return True
 
     try:
-        from SYS.metadata import normalize_urls
+        from SYS.url_normalize import normalize_urls
     except Exception:
         normalize_urls = None  # type: ignore[assignment]
 

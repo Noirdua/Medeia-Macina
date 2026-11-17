@@ -116,7 +116,7 @@ def coerce_to_pipe_object(
         extra = {k: v for k, v in value.items() if k not in known_keys}
 
         # Extract URL: prefer direct url field, then url list
-        from SYS.metadata import normalize_urls
+        from SYS.url_normalize import normalize_urls
 
         url_list = normalize_urls(value.get("url"))
         url_val = url_list[0] if url_list else None

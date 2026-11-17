@@ -12,7 +12,6 @@ import sys
 import threading
 import time
 import uuid
-from copy import deepcopy
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
@@ -292,10 +291,7 @@ class ConfigLoader:
             return {}
 
     def load(self) -> Dict[str, Any]:
-        try:
-            return deepcopy(self.load_shared())
-        except Exception:
-            return {}
+        return self.load_shared()
 
 
 console = Console()

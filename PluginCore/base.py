@@ -523,15 +523,36 @@ class Plugin(ABC):
                 return text
         return None
 
+    def plugin_setting(self, *keys: str, default: Any = None) -> Any:
+        """Read a plugin setting from plugin.<name> first, then the top-level config."""
+        bags: List[Dict[str, Any]] = []
+        try:
+            root = self.plugin_config_root()
+        except Exception:
+            root = {}
+        if isinstance(root, dict) and root:
+            bags.append(root)
+        if isinstance(self.config, dict):
+            bags.append(self.config)
+        wanted = [str(key or "").strip().lower() for key in keys if str(key or "").strip()]
+        for bag in bags:
+            folded = {str(key).strip().lower(): value for key, value in bag.items()}
+            for key in wanted:
+                if key not in folded:
+                    continue
+                value = folded[key]
+                if value in (None, ""):
+                    continue
+                return value
+        return default
+
     def plugin_config_root(self) -> Dict[str, Any]:
-        if not isinstance(self.config, dict):
-            return {}
-        section_cfg = self.config.get("plugin")
-        if isinstance(section_cfg, dict):
-            entry = section_cfg.get(self.plugin_config_key())
-            if isinstance(entry, dict):
-                return dict(entry)
-        return {}
+        names = [self.plugin_config_key()]
+        for alias in getattr(self, "PLUGIN_ALIASES", ()) or ():
+            text = str(alias or "").strip().lower()
+            if text and text not in names:
+                names.append(text)
+        return plugin_config_block(self.config, *names)
 
     def plugin_instance_configs(self) -> Dict[str, Dict[str, Any]]:
         entry = self.plugin_config_root()
@@ -964,7 +985,13 @@ class Plugin(ABC):
 
     def validate(self) -> bool:
         """Check if the plugin is available and properly configured."""
-        return not self.missing_plugin_depends()
+        if self.missing_plugin_depends():
+            return False
+        try:
+            missing = self.missing_required_config()
+        except Exception:
+            return True
+        return not missing
 
     def selector(
         self,
@@ -1112,7 +1139,7 @@ class Plugin(ABC):
                     p = str(prefix or "").strip().lower()
                     if not p:
                         continue
-                    if t == p or t.startswith(p + ".") or t.startswith(p):
+                    if t == p or t.startswith(p + "."):
                         stage = cmd
                         break
             except Exception:
@@ -1174,6 +1201,24 @@ class Plugin(ABC):
                     seen.add(candidate)
                     prefixes.append(candidate)
         return tuple(prefixes)
+
+
+def plugin_config_block(config: Any, *names: str) -> Dict[str, Any]:
+    """Return the first non-empty plugin.<name> block, matching names case-insensitively."""
+    if not isinstance(config, dict):
+        return {}
+    section = config.get("plugin")
+    if not isinstance(section, dict):
+        return {}
+    wanted = [str(name or "").strip().lower() for name in names if str(name or "").strip()]
+    if not wanted:
+        return {}
+    folded = {str(key).strip().lower(): value for key, value in section.items()}
+    for name in wanted:
+        entry = folded.get(name)
+        if isinstance(entry, dict) and entry:
+            return dict(entry)
+    return {}
 
 
 Provider = Plugin

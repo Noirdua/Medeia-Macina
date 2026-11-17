@@ -89,10 +89,7 @@ def _iter_cmdlet_module_names() -> Iterator[str]:
             if not (filename.endswith(".py") and not filename.startswith("_")
                     and filename != "__init__.py"):
                 continue
-            mod_name = filename[:-3]
-            if "_" not in mod_name:
-                continue
-            yield mod_name
+            yield filename[:-3]
 
     return _generator()
 

@@ -23,6 +23,7 @@ _DEFAULT_USER_AGENT = (
 
 _lock = threading.Lock()
 _MAX_SHARED_CLIENTS = 8
+_MAX_RETIRED_CLIENTS = 2
 _shared_clients: "OrderedDict[Tuple[Any, ...], httpx.Client]" = OrderedDict()
 _retired_clients: "list[httpx.Client]" = []
 
@@ -99,8 +100,16 @@ def get_shared_httpx_client(
         while len(_shared_clients) > _MAX_SHARED_CLIENTS:
             _, old_client = _shared_clients.popitem(last=False)
             _retired_clients.append(old_client)
+        closing: list[httpx.Client] = []
+        while len(_retired_clients) > _MAX_RETIRED_CLIENTS:
+            closing.append(_retired_clients.pop(0))
 
-        return client
+    for retired in closing:
+        try:
+            retired.close()
+        except Exception:
+            pass
+    return client
 
 
 def close_shared_httpx_client() -> None:

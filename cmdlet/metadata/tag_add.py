@@ -605,20 +605,22 @@ def _matches_target(
     multiple stores). When target_store is provided, it must match too.
     """
 
+    from SYS.utils import path_key
+
     def norm(val: Any) -> Optional[str]:
         return str(val).lower() if val is not None else None
 
     target_hash_l = target_hash.lower() if target_hash else None
-    target_path_l = target_path.lower() if target_path else None
+    target_path_l = path_key(target_path) if target_path else None
     target_store_l = target_instance.lower() if target_instance else None
 
     if isinstance(item, dict):
         hashes = [norm(item.get("hash"))]
-        paths = [norm(item.get("path"))]
+        paths = [path_key(item.get("path")), path_key(item.get("target"))]
         stores = [norm(item.get("store"))]
     else:
         hashes = [norm(get_field(item, "hash"))]
-        paths = [norm(get_field(item, "path"))]
+        paths = [path_key(get_field(item, "path")), path_key(get_field(item, "target"))]
         stores = [norm(get_field(item, "store"))]
 
     if target_store_l:

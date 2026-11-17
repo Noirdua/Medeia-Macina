@@ -18,12 +18,13 @@ a few key methods and attributes.
 
 Minimum expectations:
 - `class MyPlugin(Plugin):` subclasses the base plugin class.
-- `PLUGIN_NAME`, `PLUGIN_VERSION`, `PLUGIN_AUTHOR`, `PLUGIN_DESCRIPTION` identify the plugin in `.plugin` / `.plugin -available`.
+- `PLUGIN_NAME` equals the plugin folder name. `PLUGIN_VERSION`, `PLUGIN_AUTHOR`, and `PLUGIN_DESCRIPTION` identify the plugin in `.plugin` / `.plugin -available`.
+- `SUPPORTED_CMDLETS` lists only cmdlets the class actually implements.
 - `PLUGIN_REQUIRES` and/or `requirements.txt`: pip packages installed by `.plugin -add` / `-update`.
 - `PLUGIN_DEPENDS`: other plugin names required (e.g. `("playwright",)`). `.plugin -install` asks to install them first.
-- `URL`, `URL_DOMAINS`, or `url_patterns()` let the registry route URLs.
+- `URL` for scheme prefixes (`tidal:`, `ftp://`) and `URL_DOMAINS` for hosts. Do not copy another plugin's domains onto an alias subclass.
 - `validate(self) -> bool` returns `True` when the plugin is configured and usable.
-- `search(self, query, limit=50, filters=None, **kwargs)` returns a list of `SearchResult` items.
+- Implement the methods you declare. `search()` is not required. A search plugin returns `list[SearchResult]`.
 
 Optional but common:
 - `download(self, result: SearchResult, output_dir: Path) -> Optional[Path]`
@@ -85,7 +86,7 @@ class HelloPlugin(Plugin):
 ## Implementing `download()` and `download_url()`
 - Prefer plugin `download(self, result, output_dir)` for piped plugin items.
 - For plugin-provided URLs, implement `download_url` so `download-file` can route downloads through the plugin.
-- Use the repo `_download_direct_file` helper for HTTP downloads when possible.
+- Use `API.HTTP.download_direct_file` for HTTP downloads. `download`, `download_url`, and `handle_url` should agree on `Path | None`.
 
 Example download method:
 
@@ -94,7 +95,8 @@ def download(self, result: SearchResult, output_dir: Path) -> Optional[Path]:
     url = getattr(result, "path", None)
     if not url or not url.startswith("http"):
         return None
-    return _download_direct_file(url, output_dir)
+    from API.HTTP import download_direct_file
+    return download_direct_file(url, output_dir)
 ```
 
 ---
@@ -105,8 +107,7 @@ Plugins can declare:
 - `URL_DOMAINS = ("example.com",)` to match hosts
 - `@classmethod def url_patterns(cls):` to combine static and dynamic patterns
 
-The registry uses these declarations to match `download-file <url>` and to pick
-which plugin should handle a URL.
+The registry scores these declarations. A scheme prefix beats a host, a longer host beats a shorter one, and an alias subclass does not steal its parent's host when both match equally. `TABLE_AUTO_STAGES` may only name tables and cmdlets this plugin implements.
 
 ---
 
@@ -134,8 +135,8 @@ pytest -q
 ---
 
 ## Registration and packaging
-- Bundled plugins live under `plugins/` and are auto-discovered from that package.
-- External plugins can be dropped into `plugins/` or any directory listed in `MM_PLUGIN_PATH` or `MEDEIA_PLUGIN_PATH`.
+- Plugin source lives in the DLC catalog (`Medeia-Macina-Plugin`, or `plugin_source`). Install with `.plugin -add`. This repo's `plugins/` is the install cache.
+- Drop-in plugins can also live in `plugins/` or any directory listed in `MM_PLUGIN_PATH` or `MEDEIA_PLUGIN_PATH`.
 - Package directories are preferred so plugin-specific files travel with the plugin.
 - Plugin authors should import from `PluginCore.*`.
 
@@ -234,19 +235,19 @@ COMMANDS = [CMDLET]
 Extra `file -<action>` flags use `FILE_ACTIONS` on the Plugin class (see playwright). Extra `metadata -<action>` flags use `METADATA_ACTIONS` (see metadata+).
 
 ## Example plugin checklist
-- [ ] Put the plugin in `plugins/<name>/__init__.py`.
-- [ ] Subclass `Plugin` and set `PLUGIN_NAME` to the folder name.
+- [ ] Put the plugin in the DLC catalog as `<name>/__init__.py`. `PLUGIN_NAME` equals that folder name.
 - [ ] Set `PLUGIN_VERSION`, `PLUGIN_AUTHOR`, `PLUGIN_DESCRIPTION`.
 - [ ] Set `SUPPORTED_CMDLETS` to the cmdlets you actually implement.
-- [ ] Implement `search()` / `download()` / `upload()` to match those cmdlets.
+- [ ] Implement those methods. Do not advertise `download-file` in `TABLE_AUTO_STAGES` without `download` or `download_url`.
+- [ ] Read config with `plugin_config_root()` / `resolve_plugin_instance()`, not a private key walker.
 - [ ] Implement `validate()` for required config.
 - [ ] Set `CONFIG_HELP` (and schema `"help"`) so `.config` explains how to get keys.
 - [ ] Extra commands go in `commands.py` with summary, usage, examples, detail.
-- [ ] Provide `URL`, `URL_DOMAINS`, or `url_patterns()` if you handle URLs.
-- [ ] Run `python -m PluginCore.validate <name>` until it PASSes.
+- [ ] Provide `URL` and/or `URL_DOMAINS` if you handle URLs. Alias subclasses should not copy the parent host list.
+- [ ] Run `python -m PluginCore.validate <dlc-root>` until it PASSes.
 
 ---
 
 ## Further reading
-- See existing bundled plugins in `plugins/` for patterns and edge cases.
+- See the DLC catalog for patterns. `plugins/` in this repo is the install cache, not the source.
 - Check `API/` helpers for HTTP and debrid clients used by plugins.

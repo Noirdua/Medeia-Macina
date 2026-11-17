@@ -13,7 +13,7 @@ Features:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Callable, Set, Tuple
+from typing import Any, Dict, List, Optional, Callable, Sequence, Set, Tuple
 from pathlib import Path
 from urllib.parse import urlparse
 import json
@@ -612,49 +612,31 @@ def _as_dict(item: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _first_item_text(item: Any, keys: Sequence[str]) -> str:
+    from SYS.item_accessors import get_field
+
+    for key in keys:
+        try:
+            value = get_field(item, key, None)
+        except Exception:
+            value = None
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
 def extract_store_value(item: Any) -> str:
-    """Extract storage backend name from item.
-
-    Searches item for store identifier using field names:
-    store, table.
-
-    Args:
-        item: Object or dict with store information
-
-    Returns:
-        Store name as string (e.g., "hydrus", "local", "") if not found
-    """
-    data = _as_dict(item) or {}
-    instance = _get_first_dict_value(data, ["instance"])
-    if instance:
-        return str(instance).strip()
-    store = _get_first_dict_value(
-        data,
-        ["store",
-         "table"]
-    )
-    return str(store or "").strip()
+    """Extract storage backend name from item."""
+    return _first_item_text(item, ("instance", "store", "table"))
 
 
 def extract_hash_value(item: Any) -> str:
-    data = _as_dict(item) or {}
-    hv = _get_first_dict_value(data, ["hash", "hash_hex", "file_hash", "sha256"])
-    return str(hv or "").strip()
+    return _first_item_text(item, ("hash", "hash_hex", "file_hash", "sha256"))
 
 
 def extract_title_value(item: Any) -> str:
-    data = _as_dict(item) or {}
-    if not isinstance(data, dict):
-        data = {}
-    title = _get_first_dict_value(data, ["title", "name", "filename"])
-    if not title:
-        title = _get_first_dict_value(
-            data,
-            ["target",
-             "path",
-             "url"]
-        )  # last resort display
-    return str(title or "").strip()
+    return _first_item_text(item, ("title", "name", "filename", "target", "path", "url"))
 
 
 def extract_ext_value(item: Any) -> str:
@@ -1720,14 +1702,15 @@ class Table:
 
     def to_rich(self):
         """Return a Rich renderable representing this table."""
-        appearance_mode = get_result_table_appearance_mode()
-        header_style = get_result_table_header_style({"table_appearance": appearance_mode})
-        border_style = get_result_table_border_style({"table_appearance": appearance_mode})
-        panel_style = get_result_table_panel_style({"table_appearance": appearance_mode})
-        table_box = get_result_table_box()
-        panel_box = get_result_panel_box()
-        show_lines = get_result_table_show_lines()
-        expand = get_result_table_expand()
+        display = _display_config()
+        appearance_mode = get_result_table_appearance_mode(display)
+        header_style = get_result_table_header_style(display)
+        border_style = get_result_table_border_style(display)
+        panel_style = get_result_table_panel_style(display)
+        table_box = get_result_table_box(display)
+        panel_box = get_result_panel_box(display)
+        show_lines = get_result_table_show_lines(display)
+        expand = get_result_table_expand(display)
 
         if not self.rows:
             empty = _rich().Text("No results")
@@ -1769,7 +1752,7 @@ class Table:
         table.add_column("#", justify="right", no_wrap=True)
 
         for name in col_names:
-            header = format_result_table_header(name)
+            header = format_result_table_header(name, display)
             if name.lower() == "ext":
                 table.add_column(header, no_wrap=True)
             elif name.lower() == "tag":
@@ -1788,6 +1771,7 @@ class Table:
                 style=get_result_table_row_style(
                     row_idx - 1,
                     appearance_mode=appearance_mode,
+                    config=display,
                 ),
             )
 
@@ -2222,40 +2206,26 @@ class Table:
 
 
 def _format_size(size: Any, integer_only: bool = False) -> str:
-    """Format file size as human-readable string.
-
-    Args:
-        size: Size in bytes or already formatted string
-        integer_only: If True, show MB as an integer (e.g., "250 MB")
-
-    Returns:
-        Formatted size string with units (e.g., "3.53 MB", "0.57 MB", "1.2 GB")
-    """
+    """Format file size as human-readable string."""
     if isinstance(size, str):
         return size if size else ""
-
     try:
         bytes_val = int(size)
-        if bytes_val < 0:
-            return ""
-
-        # Keep display consistent with the CLI expectation: show MB with unit
-        # (including values under 1 MB as fractional MB), and show GB for very
-        # large sizes.
+    except (ValueError, TypeError):
+        return ""
+    if bytes_val < 0:
+        return ""
+    if integer_only:
         if bytes_val >= 1024**3:
             value = bytes_val / (1024**3)
             unit = "GB"
         else:
             value = bytes_val / (1024**2)
             unit = "MB"
+        return f"{int(round(value))} {unit}"
+    from SYS.utils import format_bytes
 
-        if integer_only:
-            return f"{int(round(value))} {unit}"
-
-        num = f"{value:.2f}".rstrip("0").rstrip(".")
-        return f"{num} {unit}"
-    except (ValueError, TypeError):
-        return ""
+    return format_bytes(bytes_val)
 
 
 def format_result(result: Any, title: str = "") -> str:
@@ -2277,6 +2247,39 @@ def format_result(result: Any, title: str = "") -> str:
         table.add_result(result)
 
     return str(table)
+
+_FILE_URL_CACHE: Dict[tuple[str, str], str] = {}
+_FILE_URL_CACHE_MAX = 256
+
+
+def _cached_store_file_url(store_val: str, hash_val: str) -> str:
+    key = (str(store_val or "").strip().lower(), str(hash_val or "").strip().lower())
+    if not key[0] or not key[1]:
+        return ""
+    cached = _FILE_URL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    resolved = ""
+    try:
+        from SYS.config import load_config
+        from PluginCore.backend_registry import get_or_create_registry
+
+        cfg = load_config(emit_summary=False)
+        registry = get_or_create_registry(cfg, suppress_debug=True)
+        if registry.is_available(str(store_val)):
+            backend = registry[str(store_val)]
+            candidate_url = getattr(backend, "file_url", None)
+            if callable(candidate_url):
+                resolved = str(candidate_url(str(hash_val)) or "")
+            elif isinstance(candidate_url, str):
+                resolved = candidate_url.format(hash=str(hash_val))
+    except Exception:
+        resolved = ""
+    if len(_FILE_URL_CACHE) >= _FILE_URL_CACHE_MAX:
+        _FILE_URL_CACHE.pop(next(iter(_FILE_URL_CACHE)))
+    _FILE_URL_CACHE[key] = resolved
+    return resolved
+
 
 def extract_item_metadata(item: Any) -> Dict[str, Any]:
     """Extract a comprehensive set of metadata from an item for the ItemDetailView.
@@ -2383,24 +2386,19 @@ def extract_item_metadata(item: Any) -> Dict[str, Any]:
         hash_val = data.get("hash") or data.get("hash_hex") or data.get("file_hash")
         store_val = data.get("store") or data.get("source") or store
         if hash_val and store_val:
-            try:
-                from SYS.config import load_config
-                from PluginCore.backend_registry import get_or_create_registry
-                cfg = load_config(emit_summary=False)
-                br = get_or_create_registry(cfg, suppress_debug=True)
-                if br.is_available(str(store_val)):
-                    backend = br[str(store_val)]
-                    if not out.get("Plugin"):
-                        store_type = str(getattr(backend, "STORE_TYPE", "") or "").strip()
+            path = _cached_store_file_url(str(store_val), str(hash_val)) or None
+            if path and not out.get("Plugin"):
+                try:
+                    from PluginCore.backend_registry import get_or_create_registry
+                    from SYS.config import load_config
+
+                    registry = get_or_create_registry(load_config(emit_summary=False), suppress_debug=True)
+                    if registry.is_available(str(store_val)):
+                        store_type = str(getattr(registry[str(store_val)], "STORE_TYPE", "") or "").strip()
                         if store_type:
                             out["Plugin"] = store_type
-                    candidate_url = getattr(backend, "file_url", None)
-                    if callable(candidate_url):
-                        path = candidate_url(str(hash_val))
-                    elif isinstance(candidate_url, str):
-                        path = candidate_url.format(hash=str(hash_val))
-            except Exception:
-                pass
+                except Exception:
+                    pass
     if path:
         out["Path"] = str(path) if not isinstance(path, (list, tuple)) else str(path[0]) if path else ""
     
@@ -2549,7 +2547,8 @@ class ItemDetailView(Table):
         from rich.text import Text
 
         # 1. Create Detail Grid (matching rich_display.py style)
-        styles = theme_styles()
+        display = _display_config()
+        styles = theme_styles(display)
 
         def _kv_grid() -> Any:
             grid = _rich().RichTable.grid(expand=True, padding=(0, 2))
@@ -2826,11 +2825,11 @@ class ItemDetailView(Table):
 
         if has_details:
              detail_title = str(self.detail_title or "Item Details").strip() or "Item Details"
-             elements.append(themed_panel(details_table, title=detail_title, padding=(1, 2)))
+             elements.append(themed_panel(details_table, title=detail_title, padding=(1, 2), config=display))
 
         if results_renderable:
             if isinstance(results_renderable, _rich().Panel):
-                wrap = theme_styles()
+                wrap = theme_styles(display)
                 results_renderable.border_style = wrap["border"]
                 results_renderable.style = wrap["panel"]
                 if results_renderable.title:
@@ -2842,6 +2841,6 @@ class ItemDetailView(Table):
             else:
                 display_title = original_title or "Items"
                 results_group = _rich().Group(_rich().Text(""), results_renderable, _rich().Text(""))
-                elements.append(themed_panel(results_group, title=str(display_title)))
+                elements.append(themed_panel(results_group, title=str(display_title), config=display))
 
         return _rich().Group(*elements)
