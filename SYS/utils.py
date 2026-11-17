@@ -59,10 +59,6 @@ def consume_bracket_list(args: Sequence[Any], flag_index: int) -> tuple[str, int
     return value, i
 
 
-def format_byte_size(size_bytes: Any) -> str:
-    return format_bytes(size_bytes)
-
-
 _ffmpeg_mod: Any = None
 _ffmpeg_checked = False
 
@@ -242,6 +238,19 @@ def join_remote_path(parent: Any, child: Any, base_path: str = "/") -> str:
     return normalize_remote_path(posixpath.join(left, right), default="/")
 
 
+def reserve_download_path(
+    output_dir: str | Path,
+    filename: str,
+    *,
+    fallback: str = "download",
+) -> Path:
+    """Create the output directory and reserve a unique file name inside it."""
+    directory = Path(output_dir)
+    ensure_directory(directory)
+    name = sanitize_filename(str(filename or ""), fallback=fallback)
+    return unique_path(directory / name)
+
+
 def unique_path(path: Path) -> Path:
     """Return a unique path by appending " (n)" if needed.
 
@@ -254,8 +263,16 @@ def unique_path(path: Path) -> Path:
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     for counter in range(0, 10_000):
         candidate = path if counter == 0 else parent / f"{stem} ({counter}){suffix}"
+        target = os.fspath(candidate)
+        if os.name == "nt":
+            try:
+                full = os.path.abspath(target)
+            except Exception:
+                full = target
+            if len(full) >= 240 and not str(full).startswith("\\\\?\\"):
+                target = "\\\\?\\" + full
         try:
-            fd = os.open(os.fspath(candidate), flags)
+            fd = os.open(target, flags)
         except FileExistsError:
             continue
         except IsADirectoryError:
@@ -291,6 +308,13 @@ def coerce_int(value: Any, default: int = 0) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def config_get(config: Any, key: str, default: Any = None) -> Any:
+    """Read a runtime key from a config dict. Non-dicts return the default."""
+    if not isinstance(config, dict):
+        return default
+    return config.get(key, default)
 
 
 def coerce_bool(value: Any, default: bool = False) -> bool:

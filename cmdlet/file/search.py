@@ -12,6 +12,7 @@ from SYS.logger import log, debug, debug_panel
 from SYS.payload_builders import build_file_result_payload, normalize_file_extension
 from PluginCore.registry import REGISTRY, get_plugin_for_cmdlet, list_plugins_for_cmdlet
 from SYS.rich_display import (
+    prepare_result_table,
     show_plugin_config_panel,
     show_available_plugins_panel,
     show_no_search_plugins_panel,
@@ -723,7 +724,7 @@ class search_file(Cmdlet):
         try:
             results_list: List[Dict[str, Any]] = []
 
-            from SYS.result_table import Table
+            from SYS.rich_display import prepare_result_table
 
             provider_text = str(plugin_name or "").strip()
             provider_lower = provider_text.lower()

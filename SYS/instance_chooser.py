@@ -93,6 +93,43 @@ def _strip_instance_tokens(tokens: Sequence[str]) -> List[str]:
     return out
 
 
+def merge_path_row_actions(
+    actions: Sequence[Optional[Sequence[str]]],
+) -> Optional[List[str]]:
+    """Merge file -add actions that differ only by -path into one command."""
+    cleaned = [[str(t) for t in action] for action in actions if action]
+    if len(cleaned) < 2:
+        return list(cleaned[0]) if cleaned else None
+    paths: List[str] = []
+    template: Optional[List[str]] = None
+    for tokens in cleaned:
+        path = _token_value(tokens, "-path", "--path")
+        if not path:
+            return None
+        stripped = _strip_instance_tokens(tokens)
+        kept: List[str] = []
+        skip_next = False
+        for tok in stripped:
+            if skip_next:
+                skip_next = False
+                continue
+            low = str(tok).replace("_", "-").strip().lower()
+            if low in {"-path", "--path"}:
+                skip_next = True
+                continue
+            if low.startswith("-path=") or low.startswith("--path="):
+                continue
+            kept.append(str(tok))
+        if template is None:
+            template = kept
+        elif kept != template:
+            return None
+        paths.append(path)
+    if not template or not paths:
+        return None
+    return template + ["-path", ",".join(paths)]
+
+
 def merge_instance_row_actions(
     actions: Sequence[Optional[Sequence[str]]],
 ) -> Optional[List[str]]:
@@ -188,11 +225,23 @@ def store_pipeline_target_instances(stages: Sequence[Sequence[str]]) -> List[str
     return names
 
 
+def _stage_searches_all_instances(stage: Sequence[str]) -> bool:
+    tokens = [str(token or "").strip().lower() for token in (stage or []) if str(token or "").strip()]
+    if not tokens:
+        return False
+    head = tokens[0].replace("_", "-")
+    if head in {"search-file", "search"}:
+        return True
+    return head == "file" and any(token in {"-search", "--search"} for token in tokens[1:])
+
+
 def first_unresolved_plugin(
     stages: Sequence[Sequence[str]],
     config: Dict[str, Any],
 ) -> Optional[str]:
     for stage in stages or []:
+        if _stage_searches_all_instances(stage):
+            continue
         plugin_name = _token_value(stage, "-plugin", "--plugin")
         if not plugin_name or stage_has_instance(stage):
             continue

@@ -96,10 +96,15 @@ _SCRAPE_MAX_ASSETS = 500
 _SCRAPE_MAX_BYTES = 2_500_000
 _SCRAPE_CACHE_TTL = 30.0
 _SCRAPE_CACHE_MAX = 64
+_SCRAPE_SESSION_MAX = 32
 _SCRAPE_CACHE: Dict[str, tuple[float, List[Dict[str, str]]]] = {}
+_SCRAPE_SESSION: Dict[str, List[Dict[str, str]]] = {}
 
 
 def _scrape_cache_get(target: str) -> Optional[List[Dict[str, str]]]:
+    remembered = _SCRAPE_SESSION.get(target)
+    if remembered is not None:
+        return remembered
     cached = _SCRAPE_CACHE.get(target)
     if cached is None:
         return None
@@ -120,8 +125,11 @@ def _scrape_cache_put(target: str, assets: List[Dict[str, str]]) -> None:
     for key in expired:
         _SCRAPE_CACHE.pop(key, None)
     _SCRAPE_CACHE[target] = (now, assets)
+    _SCRAPE_SESSION[target] = assets
     while len(_SCRAPE_CACHE) > _SCRAPE_CACHE_MAX:
         _SCRAPE_CACHE.pop(next(iter(_SCRAPE_CACHE)))
+    while len(_SCRAPE_SESSION) > _SCRAPE_SESSION_MAX:
+        _SCRAPE_SESSION.pop(next(iter(_SCRAPE_SESSION)))
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _DDG_RESULT_ANCHOR_RE = re.compile(
     r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',

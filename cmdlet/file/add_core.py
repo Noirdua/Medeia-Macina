@@ -188,10 +188,12 @@ class Add_File(Cmdlet):
         plugin_key = Add_File._normalize_plugin_key(plugin_name)
         if path_arg and plugin_key == "local":
             try:
-                path_obj = Path(str(path_arg))
+                path_obj = Path(str(path_arg)).expanduser()
             except Exception:
                 path_obj = None
-            if path_obj is None or not path_obj.is_file():
+            if path_obj is not None and path_obj.is_dir():
+                pass
+            elif path_obj is None or not path_obj.is_file():
                 folder_name = folder_name or path_arg
                 if path_obj is None or not path_obj.exists():
                     source_arg = None
@@ -227,7 +229,7 @@ class Add_File(Cmdlet):
         dir_scan_results: Optional[List[Dict[str, Any]]] = None
         explicit_source_list_results: Optional[List[Dict[str, Any]]] = None
 
-        if source_arg and location and not plugin_name:
+        if source_arg and not has_pipe:
             try:
                 source_text = str(source_arg)
             except Exception:
@@ -415,11 +417,12 @@ class Add_File(Cmdlet):
                 from SYS.result_table import Table
                 from pathlib import Path as _Path
 
-                base_args: List[str] = []
+                base_args: List[str] = ["-add"]
                 if plugin_name:
                     base_args.extend(["-plugin", str(plugin_name)])
-                if location:
-                    base_args.extend(["-instance", str(location)])
+                instance_name = plugin_instance or location
+                if instance_name:
+                    base_args.extend(["-instance", str(instance_name)])
                 if source_url_arg:
                     base_args.extend(["-url", str(source_url_arg)])
                 if bool(delete_after):
@@ -427,7 +430,7 @@ class Add_File(Cmdlet):
 
                 table = Table(title="Files in Directory", preserve_order=True)
                 table.set_table("add-file.directory")
-                table.set_source_command("add-file", base_args)
+                table.set_source_command("file", base_args)
 
                 rows: List[Dict[str, Any]] = []
                 for file_info in dir_scan_results or []:
@@ -441,6 +444,8 @@ class Add_File(Cmdlet):
                     ext = str(file_info.get("ext") or "").lstrip(".")
                     size = file_info.get("size", 0)
 
+                    file_path = str(p) if p is not None else ""
+                    action = ["file", "-add", "-path", file_path, *base_args[1:]]
                     row_item = build_table_result_payload(
                         title=clean_title,
                         columns=[
@@ -449,8 +454,9 @@ class Add_File(Cmdlet):
                             ("Size", size),
                             ("Ext", ext),
                         ],
-                        selection_args=[str(p) if p is not None else ""],
-                        path=str(p) if p is not None else "",
+                        selection_args=["-path", file_path],
+                        selection_action=action,
+                        path=file_path,
                         hash=hp,
                     )
                     rows.append(row_item)
@@ -464,7 +470,17 @@ class Add_File(Cmdlet):
                         "table": "add-file.directory"
                     }
                 )
-                log(f"✓ Found {len(rows)} files. Select with @N (e.g., @1 or @1-3).")
+                try:
+                    from SYS.rich_display import stdout_console
+
+                    stdout_console().print(table)
+                    setattr(table, "_rendered_by_cmdlet", True)
+                except Exception:
+                    pass
+                if not rows:
+                    log("No supported files in that directory.", file=sys.stderr)
+                    return 1
+                log(f"Found {len(rows)} files. Select with @N or @1-{len(rows)} to add them.")
                 return 0
             except Exception as exc:
                 debug(

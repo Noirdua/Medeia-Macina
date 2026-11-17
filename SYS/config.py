@@ -1356,6 +1356,15 @@ def _extract_expected_alldebrid_key(config: Dict[str, Any]) -> Optional[str]:
     return expected_key
 
 
+def load_config_view(*, emit_summary: bool = False) -> Dict[str, Any]:
+    """Return the cached config without copying. Do not mutate the result."""
+    from types import MappingProxyType
+
+    if not _CONFIG_CACHE:
+        load_config(emit_summary=emit_summary)
+    return MappingProxyType(_CONFIG_CACHE or {})
+
+
 def load_config(*, emit_summary: bool = False) -> Dict[str, Any]:
     global _CONFIG_CACHE, _LAST_SAVED_CONFIG, _CONFIG_SUMMARY_PENDING
     if _CONFIG_CACHE:

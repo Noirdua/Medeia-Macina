@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, cast
 import typer
 from prompt_toolkit import PromptSession
 from prompt_toolkit.document import Document
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.layout import Layout
@@ -706,6 +707,20 @@ class CLI:
             complete_while_typing = _coerce_bool(repl_cfg.get("complete_while_typing"), True)
         except Exception:
             complete_while_typing = True
+        completion_keys = KeyBindings()
+
+        @completion_keys.add("tab")
+        def _show_completions(event: Any) -> None:
+            buff = event.app.current_buffer
+            if buff.complete_state is None:
+                buff.start_completion(select_first=False)
+            else:
+                buff.complete_next()
+
+        @completion_keys.add("c-space")
+        def _open_completions(event: Any) -> None:
+            event.app.current_buffer.start_completion(select_first=False)
+
         session = PromptSession(
             completer=cast(Any,
                            completer),
@@ -714,6 +729,8 @@ class CLI:
             bottom_toolbar=get_toolbar,
             refresh_interval=0.5,
             complete_while_typing=complete_while_typing,
+            reserve_space_for_menu=8,
+            key_bindings=completion_keys,
         )
 
         queued_inputs: List[Dict[str, Any]] = []

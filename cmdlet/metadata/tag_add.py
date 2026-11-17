@@ -1385,7 +1385,7 @@ class Add_Tag(Cmdlet):
             changed = False
             refreshed_list = list(existing_tag_list)
             try:
-                from SYS.metadata import compute_namespaced_tag_overwrite
+                from SYS.tag_ops import compute_namespaced_tag_overwrite
             except Exception:
                 compute_namespaced_tag_overwrite = None  # type: ignore
 

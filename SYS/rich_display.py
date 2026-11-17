@@ -127,7 +127,7 @@ def prepare_result_table(
 
 
 def result_payload(row: Any, *, table: str = "") -> Dict[str, Any]:
-    """Serialize a result row. Falls back to table/title/path if to_dict fails."""
+    """Serialize a result row. Falls back to the common row fields if to_dict fails."""
     try:
         payload = row.to_dict()
         if isinstance(payload, dict):
@@ -136,14 +136,27 @@ def result_payload(row: Any, *, table: str = "") -> Dict[str, Any]:
         pass
     if isinstance(row, dict):
         return dict(row)
-    payload: Dict[str, Any] = {
-        "table": str(getattr(row, "table", "") or table or ""),
-        "title": str(getattr(row, "title", "") or ""),
-        "path": str(getattr(row, "path", "") or ""),
-    }
-    meta = getattr(row, "full_metadata", None)
-    if meta is not None:
-        payload["full_metadata"] = meta
+    payload: Dict[str, Any] = {}
+    for key in (
+        "table",
+        "title",
+        "path",
+        "url",
+        "detail",
+        "annotations",
+        "media_kind",
+        "metadata",
+        "extra",
+        "full_metadata",
+    ):
+        try:
+            value = getattr(row, key, None)
+        except Exception:
+            value = None
+        if value is not None:
+            payload[key] = value
+    if table and not payload.get("table"):
+        payload["table"] = table
     return payload
 
 
@@ -155,25 +168,30 @@ def add_result_rows(table: Any, rows: Any, *, fallback_table: str = "") -> List[
     return payloads
 
 
-def publish_result_table(
+def present_selector_table(
     ctx: Any,
     table: Any,
     payloads: Any,
     *,
     subject: Any = None,
     honor_suppress: bool = False,
+    print_table: bool = True,
 ) -> None:
-    """Store a selector table and print it. Failures stay local to the caller."""
+    """Store a selector table, set the stage, and optionally print it."""
     try:
         if subject is None:
             ctx.set_last_result_table(table, payloads)
         else:
-            ctx.set_last_result_table(table, payloads, subject=subject)
+            from SYS.result_publication import publish_result_table as store_result_table
+
+            store_result_table(ctx, table, payloads, subject=subject)
         setter = getattr(ctx, "set_current_stage_table", None)
         if callable(setter):
             setter(table)
     except Exception:
         pass
+    if not print_table:
+        return
     if honor_suppress:
         try:
             if bool(getattr(ctx, "_suppress_provider_selector_print", False)):

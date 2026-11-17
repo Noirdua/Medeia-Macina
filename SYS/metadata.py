@@ -19,6 +19,7 @@ from SYS.sidecar import (
     parse_sidecar_text,
     read_sidecar_metadata as _read_sidecar_metadata,
 )
+from SYS.tag_ops import compute_namespaced_tag_overwrite
 from SYS.url_normalize import normalize_urls
 from SYS.yt_metadata import extract_ytdlp_tags
 
@@ -1717,99 +1718,6 @@ def ensure_single_title_tag(
     if chosen:
         kept.insert(0, f"title:{chosen}")
     return kept
-
-
-def compute_namespaced_tag_overwrite(
-    existing_tags: Sequence[Any],
-    incoming_tags: Sequence[Any],
-) -> Tuple[List[str],
-           List[str],
-           List[str]]:
-    """Compute a tag mutation with namespace overwrite semantics.
-
-    Rules:
-    - Incoming namespaced tags ("ns:value") overwrite any existing tags in that namespace.
-    - Overwrite is based on namespace match (case-insensitive).
-    - Additions are deduped case-insensitively against kept existing tags and within the incoming list.
-    - If an existing tag matches an incoming tag exactly, it is kept (no remove/add).
-
-    Returns:
-        (tags_to_remove, tags_to_add, merged_tags)
-
-    Notes:
-        This is intentionally store-agnostic: stores decide how to persist/apply
-        the returned mutation (DB merge write, Hydrus delete/add, etc.).
-    """
-
-    def _clean(values: Sequence[Any]) -> List[str]:
-        out: List[str] = []
-        for v in values or []:
-            if not isinstance(v, str):
-                continue
-            t = v.strip()
-            if t:
-                out.append(t.lower())
-        return out
-
-    def _ns_of(tag: str) -> str:
-        if ":" not in tag:
-            return ""
-        return tag.split(":", 1)[0].strip().lower()
-
-    existing = _clean(existing_tags)
-    incoming = _clean(incoming_tags)
-    if not incoming:
-        return [], [], existing
-
-    unique_last: Dict[str, str] = {}
-    collapsed_incoming: List[str] = []
-    for t in incoming:
-        ns = _ns_of(t)
-        if ns in UNIQUE_TAG_NAMESPACES:
-            unique_last[ns] = t
-            continue
-        collapsed_incoming.append(t)
-    collapsed_incoming.extend(unique_last.values())
-    incoming = collapsed_incoming
-
-    namespaces_to_replace: Set[str] = set()
-    for t in incoming:
-        ns = _ns_of(t)
-        if ns:
-            namespaces_to_replace.add(ns)
-
-    kept_existing: List[str] = []
-    kept_existing_lower: Set[str] = set()
-    tags_to_remove: List[str] = []
-
-    for t in existing:
-        ns = _ns_of(t)
-        if ns and ns in namespaces_to_replace:
-            # If it matches exactly, keep it; otherwise remove it.
-            if t in incoming:
-                kept_existing.append(t)
-                kept_existing_lower.add(t.lower())
-            else:
-                # If incoming has the same tag value but different casing, treat as replace.
-                tags_to_remove.append(t)
-            continue
-
-        kept_existing.append(t)
-        kept_existing_lower.add(t.lower())
-
-    tags_to_add: List[str] = []
-    added_lower: Set[str] = set()
-    for t in incoming:
-        tl = t.lower()
-        if tl in kept_existing_lower:
-            continue
-        if tl in added_lower:
-            continue
-        tags_to_add.append(t)
-        added_lower.add(tl)
-
-    merged = kept_existing + tags_to_add
-    return tags_to_remove, tags_to_add, merged
 
 
 def merge_tag_lists(*tag_lists: List[str]) -> List[str]:

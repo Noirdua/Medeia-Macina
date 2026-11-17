@@ -419,9 +419,9 @@ def _display_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if isinstance(config, dict):
         return config
     try:
-        from SYS.config import load_config
+        from SYS.config import load_config_view
 
-        return load_config(emit_summary=False) or {}
+        return load_config_view() or {}
     except Exception:
         return {}
 

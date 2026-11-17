@@ -1,32 +1,77 @@
-"""Rich-only progress helpers.
-
-These functions preserve the legacy call signatures used around the codebase,
-but all rendering is performed via Rich (no ASCII progress bars).
-"""
-
 from __future__ import annotations
 
-import sys
-
-from SYS.models import ProgressBar
-
-_BAR = ProgressBar()
+from typing import Any, Optional
 
 
-def print_progress(
-    filename: str,
-    current: int,
-    total: int,
-    speed: float = 0,
-    end: str = "\r"
-) -> None:
-    _BAR.update(
-        downloaded=int(current),
-        total=int(total) if total else None,
-        label=str(filename or "progress"),
-        file=sys.stderr,
-    )
+class TransferProgress:
+    """One adapter over pipeline progress objects and plain callbacks."""
 
+    def __init__(self, progress: Any, label: str = "download") -> None:
+        self.progress = progress
+        self.label = str(label or "download")
+        self.started = False
+        self.finished = False
 
-def print_final_progress(filename: str, total: int, elapsed: float) -> None:
-    _BAR.finish()
+    def begin(self, total: Optional[int] = None) -> None:
+        if self.progress is None or self.started:
+            return
+        fn = getattr(self.progress, "begin_transfer", None)
+        if not callable(fn):
+            return
+        try:
+            fn(label=self.label, total=total)
+        except TypeError:
+            try:
+                fn(self.label)
+            except Exception:
+                return
+        except Exception:
+            return
+        self.started = True
+        self.finished = False
+
+    def update(self, completed: Optional[int], total: Optional[int] = None) -> None:
+        if self.progress is None:
+            return
+        if not self.started:
+            self.begin(total)
+        fn = getattr(self.progress, "update_transfer", None)
+        if callable(fn):
+            try:
+                fn(label=self.label, completed=completed, total=total)
+                return
+            except TypeError:
+                try:
+                    fn(completed, total)
+                    return
+                except Exception:
+                    return
+            except Exception:
+                return
+        if callable(self.progress):
+            try:
+                self.progress("bytes", completed, total, self.label)
+            except TypeError:
+                try:
+                    self.progress(completed, total)
+                except Exception:
+                    return
+            except Exception:
+                return
+
+    def finish(self) -> None:
+        if self.progress is None or not self.started or self.finished:
+            return
+        fn = getattr(self.progress, "finish_transfer", None)
+        if callable(fn):
+            try:
+                fn(label=self.label)
+            except TypeError:
+                try:
+                    fn(self.label)
+                except Exception:
+                    return
+            except Exception:
+                return
+        self.finished = True
+        self.started = False

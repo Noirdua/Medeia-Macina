@@ -98,29 +98,76 @@ class SearchResult:
         return out
 
 
+def _scan_query_token(text: str, start: int) -> int:
+    """Return the end index of one query token, keeping [] and quotes intact."""
+    n = len(text)
+    i = start
+    depth = 0
+    quote = ""
+    while i < n:
+        char = text[i]
+        if quote:
+            if char == quote:
+                quote = ""
+            i += 1
+            continue
+        if char in "\"'":
+            quote = char
+            i += 1
+            continue
+        if char == "[":
+            depth += 1
+            i += 1
+            continue
+        if char == "]":
+            depth = max(0, depth - 1)
+            i += 1
+            continue
+        if depth == 0 and char in " \t\r\n,":
+            break
+        i += 1
+    return i
+
+
 def parse_inline_query_arguments(raw_query: str) -> Tuple[str, Dict[str, str]]:
-    """Extract inline key:value arguments from a plugin search query."""
+    """Extract inline key:value arguments from a plugin search query.
+
+    Commas and spaces inside [] or quotes stay with the value.
+    instance:[rpi,Typhon] is one field, not two tokens.
+    """
 
     query_text = str(raw_query or "").strip()
     if not query_text:
         return "", {}
 
-    tokens = re.split(r"[,\s]+", query_text)
     leftover: List[str] = []
     parsed_args: Dict[str, str] = {}
-
-    for token in tokens:
+    i = 0
+    n = len(query_text)
+    while i < n:
+        while i < n and query_text[i] in " \t\r\n,":
+            i += 1
+        if i >= n:
+            break
+        end = _scan_query_token(query_text, i)
+        token = query_text[i:end].strip().strip(",")
+        i = end
         if not token:
             continue
         sep_index = token.find(":")
-        if sep_index < 0:
-            sep_index = token.find("=")
+        eq_index = token.find("=")
+        if eq_index >= 0 and (sep_index < 0 or eq_index < sep_index):
+            sep_index = eq_index
         if sep_index > 0:
             key = token[:sep_index].strip().lower()
             value = token[sep_index + 1 :].strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
             if key and value:
                 parsed_args[key] = value
                 continue
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+            token = token[1:-1]
         leftover.append(token)
 
     return " ".join(leftover).strip(), parsed_args
@@ -523,6 +570,12 @@ class Plugin(ABC):
                 return text
         return None
 
+    def runtime_value(self, key: str, default: Any = None) -> Any:
+        """Read a pipeline-injected key such as _pipeline_progress."""
+        from SYS.utils import config_get
+
+        return config_get(self.config, key, default)
+
     def plugin_setting(self, *keys: str, default: Any = None) -> Any:
         """Read a plugin setting from plugin.<name> first, then the top-level config."""
         bags: List[Dict[str, Any]] = []
@@ -532,6 +585,9 @@ class Plugin(ABC):
             root = {}
         if isinstance(root, dict) and root:
             bags.append(root)
+            nested = root.get("default")
+            if isinstance(nested, dict):
+                bags.append(nested)
         if isinstance(self.config, dict):
             bags.append(self.config)
         wanted = [str(key or "").strip().lower() for key in keys if str(key or "").strip()]

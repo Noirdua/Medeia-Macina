@@ -477,8 +477,8 @@ def parse_query(query: str) -> Dict[str, Any]:
     raw = query.strip()
     remaining_parts: list[str] = []
 
-    # Match field:value where value is either a quoted string or a non-space token.
-    pattern = r'(\w+):(?:"([^"]*)"|(\S+))'
+    # Quoted text, a [] group, or a non-space token. Commas inside [] stay in the value.
+    pattern = r'(\w+):(?:"([^"]*)"|(\[[^\]]*\])|(\S+))'
 
     pos = 0
     for match in re.finditer(pattern, raw):
@@ -488,7 +488,10 @@ def parse_query(query: str) -> Dict[str, Any]:
                 remaining_parts.append(before_text)
 
         field_name = (match.group(1) or "").lower()
-        field_value = match.group(2) if match.group(2) is not None else match.group(3)
+        field_value = next(
+            (group for group in (match.group(2), match.group(3), match.group(4)) if group is not None),
+            "",
+        )
         if field_name:
             result["fields"][field_name] = field_value
 

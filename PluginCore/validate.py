@@ -371,7 +371,8 @@ def _check_auto_stages(
             cmd_list = []
         if any(cmd == "download-file" or cmd.endswith("download-file") for cmd in cmd_list):
             needs_download = True
-    if needs_download and not _has_cmdlet_method(
+    hands_off_download = bool(getattr(plugin_class, "AUTO_STAGE_USE_SELECTION_ARGS", False))
+    if needs_download and not hands_off_download and not _has_cmdlet_method(
         plugin_class,
         ("download", "download_url", "handle_url"),
         instance,

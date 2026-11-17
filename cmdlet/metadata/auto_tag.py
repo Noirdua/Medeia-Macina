@@ -616,7 +616,7 @@ def _collect_item_urls(
             _add(get_field(item, field))
         except Exception:
             pass
-    extra = getattr(item, "extra", None) if not isinstance(item, dict) else item.get("extra")
+    extra = get_field(item, "extra")
     if isinstance(extra, dict):
         _add(extra.get("url") or extra.get("known_urls"))
     for tag in existing:

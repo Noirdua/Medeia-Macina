@@ -203,6 +203,49 @@ class CmdletIntrospection:
             return []
 
 
+def _query_tail(segment: str) -> str:
+    """Return the current query field, ignoring commas inside []."""
+    depth = 0
+    start = 0
+    for index, char in enumerate(segment or ""):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            start = index + 1
+    return (segment or "")[start:].lstrip()
+
+
+def _closed_group(value: str) -> bool:
+    text = str(value or "").strip()
+    return text.startswith("[") and text.endswith("]") and "[" not in text[1:-1]
+
+
+def _used_query_fields(body: str) -> set[str]:
+    used: set[str] = set()
+    depth = 0
+    start = 0
+    parts: List[str] = []
+    for index, char in enumerate(body or ""):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            parts.append(body[start:index])
+            start = index + 1
+    parts.append((body or "")[start:])
+    for part in parts[:-1]:
+        chunk = part.strip()
+        if ":" not in chunk:
+            continue
+        name = chunk.split(":", 1)[0].strip().lower()
+        if name:
+            used.add(name)
+    return used
+
+
 class CmdletCompleter(Completer):
     """Prompt-toolkit completer for the Medeia cmdlet REPL."""
 
@@ -481,6 +524,56 @@ class CmdletCompleter(Completer):
         if len(text) >= 2 and text[1] == ":":
             return True
         return False
+
+    _PATH_FLAGS = frozenset({"path", "outdir", "output", "input", "dest", "destination"})
+
+    @staticmethod
+    def _filesystem_completions(current_token: str) -> List[str]:
+        raw = str(current_token or "")
+        quote_prefix = raw[:1] if raw[:1] in {"'", '"'} else ""
+        fragment = raw[1:] if quote_prefix else raw
+        if quote_prefix and fragment.endswith(quote_prefix) and len(fragment) > 1:
+            fragment = fragment[:-1]
+        if not fragment:
+            parent = Path.cwd()
+            prefix = ""
+        else:
+            expanded = os.path.expanduser(fragment)
+            candidate = Path(expanded)
+            if fragment.endswith(("\\", "/")):
+                parent = candidate
+                prefix = ""
+            else:
+                parent = candidate.parent if str(candidate.parent) not in {"", "."} else Path.cwd()
+                prefix = candidate.name
+        try:
+            if not parent.exists() or not parent.is_dir():
+                return []
+            entries = sorted(parent.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+        except Exception:
+            return []
+        out: List[str] = []
+        seen: Set[str] = set()
+        prefix_lower = prefix.lower()
+        for entry in entries:
+            try:
+                if prefix_lower and not entry.name.lower().startswith(prefix_lower):
+                    continue
+                suggestion = str(entry)
+                if entry.is_dir():
+                    suggestion += os.sep
+                if quote_prefix:
+                    suggestion = quote_prefix + suggestion
+                elif " " in suggestion:
+                    suggestion = f'"{suggestion}"'
+            except Exception:
+                continue
+            lowered = suggestion.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            out.append(suggestion)
+        return out
 
     @staticmethod
     def _path_instance_choices(current_token: str) -> List[str]:
@@ -1733,11 +1826,8 @@ class CmdletCompleter(Completer):
                     )
                     for name in (filtered or instance_choices):
                         yield Completion(str(name), start_position=-len(current_name), display_meta="instance")
-                    if instance_choices:
-                        return
-                if "," in segment:
-                    segment = segment.rsplit(",", 1)[-1].lstrip()
-                segment = segment.lstrip()
+                    return
+                segment = _query_tail(segment)
 
                 if ":" in segment:
                     field, partial = segment.split(":", 1)
@@ -1759,7 +1849,7 @@ class CmdletCompleter(Completer):
                         instance_hint = None
                         try:
                             match = re.search(
-                                r"(?:^|[\s,])instance:([^,\s]+)",
+                                r"(?:^|[\s,])instance:(\[[^\]]*\]|[^,\s]+)",
                                 query_body,
                                 flags=re.IGNORECASE,
                             )
@@ -1777,6 +1867,8 @@ class CmdletCompleter(Completer):
                                     inline_choices = names
                         except Exception:
                             pass
+                    if field in {"instance", "store"} and _closed_group(partial):
+                        return
                     if field in {"instance", "store"}:
                         instance_choices = []
                         if selected_plugin:
@@ -1821,11 +1913,18 @@ class CmdletCompleter(Completer):
                             if partial_lower else list(choice_pool)
                         )
                         for choice in (filtered or choice_pool):
-                            yield Completion(str(choice), start_position=-len(partial))
+                            yield Completion(
+                                str(choice),
+                                start_position=-len(partial),
+                                display_meta=field,
+                            )
                         return
                 else:
                     partial_lower = segment.strip().lower()
-                    field_pool = ordered_fields
+                    used_fields = _used_query_fields(query_body)
+                    if used_fields & {"instance", "store"}:
+                        used_fields.update({"instance", "store"})
+                    field_pool = [name for name in ordered_fields if name not in used_fields]
                     filtered_fields = (
                         [field for field in field_pool if field.startswith(partial_lower)]
                         if partial_lower else field_pool
@@ -1985,6 +2084,15 @@ class CmdletCompleter(Completer):
                     yield completion
             if yielded_col:
                 return
+
+        if normalized_prev in self._PATH_FLAGS and not str(current_token or "").startswith("-"):
+            for suggestion in self._filesystem_completions(raw_current_token or ""):
+                yield Completion(
+                    suggestion,
+                    start_position=-len(raw_current_token or ""),
+                    display_meta="path",
+                )
+            return
 
         if (
             prev_token.startswith("-")

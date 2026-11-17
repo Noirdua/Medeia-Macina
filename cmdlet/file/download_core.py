@@ -34,7 +34,7 @@ from SYS.selection_builder import (
     extract_urls_from_selection_args,
     selection_args_have_url,
 )
-from SYS.utils import sanitize_filename, sha256_file, unique_path
+from SYS.utils import config_get, sha256_file
 
 from PluginCore.registry import plugin_attr
 
@@ -258,14 +258,6 @@ class Download_File(Cmdlet):
         return ""
 
     @staticmethod
-    def _sanitize_export_filename(name: str) -> str:
-        return sanitize_filename(name, fallback="export")
-
-    @staticmethod
-    def _unique_export_path(path: Path) -> Path:
-        return unique_path(path)
-
-    @staticmethod
     def _load_provider_registry() -> Dict[str, Any]:
         """Lightweight accessor for plugin helpers without hard dependencies."""
         try:
@@ -321,7 +313,7 @@ class Download_File(Cmdlet):
             return
 
         try:
-            quiet_mode = bool(config.get("_quiet_background_output")) if isinstance(config, dict) else False
+            quiet_mode = bool(config_get(config, "_quiet_background_output", False))
         except Exception:
             quiet_mode = False
         if quiet_mode:
@@ -409,7 +401,7 @@ class Download_File(Cmdlet):
             provider = get_provider(provider_name, config)
             if provider and hasattr(provider, "maybe_show_picker"):
                 try:
-                    quiet_mode = bool(config.get("_quiet_background_output"))
+                    quiet_mode = bool(config_get(config, "_quiet_background_output", False))
                     res = provider.maybe_show_picker(
                         url=target_url,
                         item=piped_items[0] if piped_items else None,
@@ -503,7 +495,7 @@ class Download_File(Cmdlet):
             return 0
 
         try:
-            from SYS.rich_display import prepare_result_table
+            from SYS.rich_display import prepare_result_table, present_selector_table
             from SYS import pipeline as pipeline_context
         except Exception:
             return None
@@ -519,11 +511,13 @@ class Download_File(Cmdlet):
         for row_item in rows:
             table.add_result(row_item)
 
-        try:
-            pipeline_context.set_last_result_table(table, rows, subject=target_url)
-            pipeline_context.set_current_stage_table(table)
-        except Exception:
-            pass
+        present_selector_table(
+            pipeline_context,
+            table,
+            rows,
+            subject=target_url,
+            print_table=False,
+        )
 
         if show_types:
             log("Webpage detected: select a file type with @N, then pick files to download", file=sys.stderr)
@@ -575,7 +569,7 @@ class Download_File(Cmdlet):
             if not raw_url and isinstance(explicit_input, str) and self._path_looks_local(explicit_input):
                 local_source_inputs = [str(explicit_input)]
 
-            quiet_mode = bool(config.get("_quiet_background_output")) if isinstance(config, dict) else False
+            quiet_mode = bool(config_get(config, "_quiet_background_output", False))
 
             piped_items = []
             if not raw_url:

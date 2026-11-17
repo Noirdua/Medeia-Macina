@@ -29,7 +29,7 @@ from SYS.utils import (
     filename_from_url,
     sha256_file,
     sanitize_filename as _sanitize_filename_base,
-    unique_path as _unique_path,
+    reserve_download_path,
 )
 
 try:  # Optional; used for metadata extraction when available
@@ -736,7 +736,7 @@ def download_direct_file(
             "Could not determine filename for URL (no Content-Disposition and no path filename)"
         )
 
-    file_path = _unique_path(output_dir / str(filename))
+    file_path = reserve_download_path(output_dir, str(filename))
 
     use_pipeline_transfer = False
     try:
@@ -752,6 +752,9 @@ def download_direct_file(
     if (not quiet) and (not use_pipeline_transfer):
         progress_bar = ProgressBar()
 
+    from SYS.progress import TransferProgress
+
+    transfer = TransferProgress(pipeline_progress, str(filename or "download"))
     transfer_started = [False]
 
     try:
@@ -781,20 +784,18 @@ def download_direct_file(
 
         def progress_callback(bytes_downloaded: int, content_length: int) -> None:
             downloaded_bytes[0] = int(bytes_downloaded or 0)
-
             try:
-                if pipeline_progress is not None and hasattr(pipeline_progress, "update_transfer"):
-                    _maybe_begin_transfer(content_length)
-                    total_val: Optional[int] = (
-                        int(content_length)
-                        if isinstance(content_length, int) and content_length > 0
-                        else None
-                    )
-                    pipeline_progress.update_transfer(
-                        label=str(filename or "download"),
-                        completed=int(bytes_downloaded or 0),
-                        total=total_val,
-                    )
+                total_val: Optional[int] = (
+                    int(content_length)
+                    if isinstance(content_length, int) and content_length > 0
+                    else None
+                )
+            except Exception:
+                total_val = None
+            try:
+                if pipeline_progress is not None:
+                    transfer.update(int(bytes_downloaded or 0), total_val)
+                    transfer_started[0] = transfer.started
             except Exception:
                 logger.exception("Error updating pipeline progress transfer")
 
@@ -816,10 +817,7 @@ def download_direct_file(
             logger.exception("Failed to finish progress bar")
 
         try:
-            if pipeline_progress is not None and transfer_started[0] and hasattr(
-                pipeline_progress, "finish_transfer"
-            ):
-                pipeline_progress.finish_transfer(label=str(filename or "download"))
+            transfer.finish()
         except Exception:
             logger.exception("Failed to finish pipeline transfer")
 
@@ -878,10 +876,7 @@ def download_direct_file(
         except Exception:
             logger.exception("Failed to finish progress bar during HTTP error handling")
         try:
-            if pipeline_progress is not None and transfer_started[0] and hasattr(
-                pipeline_progress, "finish_transfer"
-            ):
-                pipeline_progress.finish_transfer(label=str(filename or "download"))
+            transfer.finish()
         except Exception:
             logger.exception("Failed to finish pipeline transfer during HTTP error handling")
 
@@ -900,10 +895,7 @@ def download_direct_file(
         except Exception:
             logger.exception("Failed to finish progress bar during error handling")
         try:
-            if pipeline_progress is not None and transfer_started[0] and hasattr(
-                pipeline_progress, "finish_transfer"
-            ):
-                pipeline_progress.finish_transfer(label=str(filename or "download"))
+            transfer.finish()
         except Exception:
             logger.exception("Failed to finish pipeline transfer during error handling")
 

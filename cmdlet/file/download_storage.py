@@ -16,7 +16,7 @@ from SYS.payload_builders import build_file_result_payload, build_table_result_p
 from SYS.result_table import Table, build_display_row
 from SYS.rich_display import stderr_console as get_stderr_console
 from SYS import pipeline as pipeline_context
-from SYS.utils import sha256_file
+from SYS.utils import config_get, sha256_file
 from rich.prompt import Prompt
 from SYS.selection_builder import build_hash_store_selection
 from API.HTTP import download_direct_file
@@ -1293,7 +1293,9 @@ def _export_store_file(
     filename = str(output_name or "").strip()
     if not filename:
         title = (metadata.get("title") if isinstance(metadata, dict) else None) or self._resolve_display_title(result, metadata) or "export"
-        filename = self._sanitize_export_filename(str(title))
+        from SYS.utils import sanitize_filename
+
+        filename = sanitize_filename(str(title), fallback="export")
 
     ext = metadata.get("ext") if isinstance(metadata, dict) else None
     if ext and not filename.endswith(str(ext)):
@@ -1308,11 +1310,13 @@ def _export_store_file(
             final_output_dir,
             quiet=True,
             suggested_filename=filename,
-            pipeline_progress=config.get("_pipeline_progress") if isinstance(config, dict) else None,
+            pipeline_progress=config_get(config, "_pipeline_progress"),
         )
         dest_path = Download_File._path_from_download_result(result_obj)
     else:
-        dest_path = self._unique_export_path(final_output_dir / filename)
+        from SYS.utils import reserve_download_path
+
+        dest_path = reserve_download_path(final_output_dir, filename, fallback="export")
         shutil.copy2(Path(source_path), dest_path)
 
     pipeline_context.emit(
@@ -1378,8 +1382,9 @@ def _process_explicit_local_sources(
             continue
 
         if explicit_output_requested:
-            destination = final_output_dir / source_path.name
-            destination = self._unique_export_path(destination)
+            from SYS.utils import reserve_download_path
+
+            destination = reserve_download_path(final_output_dir, source_path.name)
             shutil.copy2(source_path, destination)
             emit_path = destination
         else:
@@ -1487,7 +1492,7 @@ def _run_streaming_urls(
         query_hash_override=None,
         embed_chapters=False,
         write_sub=False,
-        quiet_mode=bool(config.get("_quiet_background_output")) if isinstance(config, dict) else False,
+        quiet_mode=bool(config_get(config, "_quiet_background_output", False)),
         playlist_items=playlist_items,
         ytdl_format=(ytdlp_tool.default_format("audio") if ytdlp_tool and hasattr(ytdlp_tool, "default_format") else "best"),
         skip_per_url_preflight=False,

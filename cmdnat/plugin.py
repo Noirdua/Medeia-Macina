@@ -352,6 +352,50 @@ def _run_install(names: List[str], config: Dict[str, Any], *, update: bool, forc
     return 0 if all(row.get("ok") for row in results) else 1
 
 
+def _plugin_health(name: str, config: Dict[str, Any]) -> str:
+    notes: List[str] = []
+    try:
+        from PluginCore.base import plugin_config_block
+        from PluginCore.registry import REGISTRY, _plugin_url_patterns, get_plugin_class
+
+        plugin_cls = get_plugin_class(name)
+        if plugin_cls is not None:
+            try:
+                missing = plugin_cls(config or {}).missing_required_config() or []
+            except Exception:
+                missing = []
+            keys = [
+                str(field.get("key") or "").strip()
+                for field in missing
+                if str(field.get("key") or "").strip()
+            ]
+            if keys:
+                notes.append("missing " + ", ".join(keys))
+            hosts: Dict[str, str] = {}
+            REGISTRY.discover()
+            wanted = str(getattr(plugin_cls, "PLUGIN_NAME", name) or name).strip().lower()
+            owned: List[str] = []
+            for info in REGISTRY.iter_plugins():
+                for pattern in _plugin_url_patterns(info.plugin_class):
+                    host = str(pattern or "").strip().lower()
+                    if not host or "://" in host or host.endswith(":"):
+                        continue
+                    previous = hosts.get(host)
+                    if previous and previous != info.canonical_name and info.canonical_name == wanted:
+                        notes.append(f"host {host} also claimed by {previous}")
+                        break
+                    hosts.setdefault(host, info.canonical_name)
+                    if info.canonical_name == wanted:
+                        owned.append(host)
+            if plugin_cls is not None and not notes:
+                block = plugin_config_block(config, getattr(plugin_cls, "PLUGIN_NAME", name))
+                if not block and bool(getattr(plugin_cls, "MULTI_INSTANCE", False)):
+                    notes.append("no instance configured")
+    except Exception:
+        return ""
+    return "; ".join(notes)
+
+
 def _run(result: Any, args: List[str], config: Dict[str, Any]) -> int:
     names = _merge_names(_positional_names(args), _names_from_result(result))
     if _flag(args, "-remove", "--remove", "-uninstall", "--uninstall"):
@@ -376,6 +420,9 @@ def _run(result: Any, args: List[str], config: Dict[str, Any]) -> int:
             for issue in report.issues
             if issue.level in {"error", "warning"}
         )
+        health = _plugin_health(report.name, config)
+        if health:
+            notes = f"{notes}; {health}" if notes else health
         if not notes:
             notes = report.plugin_class or report.kind
         items.append(
@@ -387,6 +434,7 @@ def _run(result: Any, args: List[str], config: Dict[str, Any]) -> int:
                     ("Author", report.author),
                     ("Description", report.description),
                     ("Status", report.status),
+                    ("Health", health or "ok"),
                     ("Notes", notes),
                 ],
                 report.name,

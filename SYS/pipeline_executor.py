@@ -1165,9 +1165,11 @@ class PipelineExecutor:
                         merged_action = row_actions[0] if row_actions else None
                     else:
                         try:
-                            from SYS.instance_chooser import merge_instance_row_actions
+                            from SYS.instance_chooser import merge_instance_row_actions, merge_path_row_actions
 
                             merged_action = merge_instance_row_actions(row_actions)
+                            if not merged_action:
+                                merged_action = merge_path_row_actions(row_actions)
                         except Exception:
                             merged_action = None
                     if merged_action:

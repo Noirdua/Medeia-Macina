@@ -437,7 +437,11 @@ def parse_cmdlet_args(
             if isinstance(fields, dict):
                 for key, value in fields.items():
                     value_text = str(value or "").strip()
-                    if not value_text or "," in value_text:
+                    if not value_text:
+                        continue
+                    if "," in value_text and not (
+                        value_text.startswith("[") and value_text.endswith("]")
+                    ):
                         continue
                     norm_fields.setdefault(str(key).strip().lower(), value_text)
         except Exception:

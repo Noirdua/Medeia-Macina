@@ -197,7 +197,7 @@ class File(Cmdlet):
                 log(f"file: conflicting actions ({rendered}); choose exactly one", file=sys.stderr)
             return 1
 
-        if action in self._PLUGIN_SCOPED_ACTIONS:
+        if action in self._PLUGIN_SCOPED_ACTIONS and action != "search":
             try:
                 from SYS.instance_chooser import maybe_publish_instance_chooser
 
