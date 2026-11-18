@@ -375,6 +375,35 @@ def sanitize_filename(name: str, *, max_len: int = 150, fallback: str = "downloa
     return cleaned or fallback
 
 
+_FOLDER_NAME_EXTS = {
+    ".rar", ".zip", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso",
+    ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm",
+    ".mp3", ".flac", ".wav", ".m4a", ".nfo", ".txt",
+}
+
+
+def display_folder_name(name: str, *, fallback: str = "download") -> str:
+    """Turn a release filename into a folder name.
+
+    Booster.Pack.Heroes.rar -> Booster Pack Heroes
+    """
+    text = str(name or "").strip().replace("\\", "/").split("/")[-1].strip()
+    if not text:
+        return sanitize_filename(fallback, fallback=fallback)
+    lower = text.lower()
+    for ext in (".tar.gz", ".tar.bz2", ".tar.xz"):
+        if lower.endswith(ext):
+            text = text[: -len(ext)]
+            lower = text.lower()
+            break
+    suffix = Path(text).suffix.lower()
+    if suffix in _FOLDER_NAME_EXTS:
+        text = text[: -len(suffix)]
+    text = text.replace(".", " ").replace("_", " ")
+    text = " ".join(text.split()).strip(" .")
+    return sanitize_filename(text, fallback=fallback)
+
+
 def unique_preserve_order(values: Iterable[Any]) -> list[Any]:
     seen: set[str] = set()
     ordered: list[str] = []
