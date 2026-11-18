@@ -480,7 +480,7 @@ class Add_File(Cmdlet):
                 if not rows:
                     log("No supported files in that directory.", file=sys.stderr)
                     return 1
-                log(f"Found {len(rows)} files. Select with @N or @1-{len(rows)} to add them.")
+                log(f"Found {len(rows)} files. Select with @N, @1-{len(rows)}, or @* to add them.")
                 return 0
             except Exception as exc:
                 debug(

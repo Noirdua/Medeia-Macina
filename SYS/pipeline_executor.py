@@ -539,6 +539,13 @@ class PipelineExecutor:
             last_items = None
         if last_items:
             return list(range(len(last_items)))
+        try:
+            table = ctx.get_last_result_table() if hasattr(ctx, "get_last_result_table") else None
+            rows = getattr(table, "rows", None) or []
+            if rows:
+                return list(range(len(rows)))
+        except Exception:
+            logger.exception("Failed to expand @* from the last result table")
         return indices
 
     @staticmethod
@@ -1172,13 +1179,18 @@ class PipelineExecutor:
                                 merged_action = merge_path_row_actions(row_actions)
                         except Exception:
                             merged_action = None
-                    if merged_action:
-                        replay = _split_pipeline_tokens(merged_action)
-                        if replay:
-                            stages[:] = replay
-                        else:
-                            stages.insert(0, list(merged_action))
-                        return True, None
+                    if not merged_action:
+                        log(
+                            "Could not add the selected files. Use @1 for one file.",
+                            file=sys.stderr,
+                        )
+                        return False, None
+                    replay = _split_pipeline_tokens(merged_action)
+                    if replay:
+                        stages[:] = replay
+                    else:
+                        stages.insert(0, list(merged_action))
+                    return True, None
 
                 if source_cmd and not skip_pipe_expansion and not prefer_row_action:
                     src = str(source_cmd).replace("_", "-").strip().lower()
@@ -1931,6 +1943,11 @@ class PipelineExecutor:
             first_stage_selection_indices = self._apply_select_all_if_requested(
                 ctx, first_stage_selection_indices, first_stage_select_all
             )
+            if first_stage_select_all and not first_stage_selection_indices:
+                log("@* matched 0 rows. No result table is loaded.", file=sys.stderr)
+                pipeline_status = "failed"
+                pipeline_error = "Empty selection"
+                return self._exit_code(pipeline_status)
             first_stage_selection_indices = self._apply_inline_filters(
                 ctx,
                 first_stage_selection_indices,

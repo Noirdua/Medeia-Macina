@@ -106,10 +106,9 @@ def merge_path_row_actions(
         path = _token_value(tokens, "-path", "--path")
         if not path:
             return None
-        stripped = _strip_instance_tokens(tokens)
         kept: List[str] = []
         skip_next = False
-        for tok in stripped:
+        for tok in tokens:
             if skip_next:
                 skip_next = False
                 continue
