@@ -93,6 +93,26 @@ def _example_for_cmd(name: str) -> List[str]:
             '.adjective -add "example"',
             '.adjective -delete "example"',
         ],
+        "metadata": [
+            "file -search -plugin help *",
+            "file -search -plugin help song",
+            "file -search -plugin help show",
+            "file -search -plugin help song | metadata -add \"series:Help\"",
+            "file -search -plugin help song | metadata -add \"title:$(track) - $(series)\"",
+            "file -search -plugin help song | metadata -tag -extract \"(artist) - (title)\"",
+            "file -search -plugin help song | metadata -add -duplicate title:album",
+            "file -search -plugin help show | metadata -add \"channel:<regex($(channel),'^kabbalah ','')>\"",
+            "file -search -plugin help * | metadata -add \"source:help\"",
+            "file -search -plugin help demo:reset",
+        ],
+        "file": [
+            "file -search -plugin help *",
+            "file -search -plugin help note",
+            "file -search -plugin help type:audio",
+            "file -search -plugin help type:video",
+            "file -search -plugin help demo:tag",
+            "file -search -plugin help demo:reset",
+        ],
     }
 
     key = name.replace("_", "-").lower()
@@ -287,7 +307,7 @@ def _render_list(
     args: Sequence[str]
 ) -> None:
     table = Table("Help")
-    table.set_header_line("Select @N for details. Use file -search / file -add and metadata -add for most work.")
+    table.set_header_line("Select @N for examples. .help -sample creates the practice library. .help -reset restores it.")
     table.set_source_command(".help", list(args))
 
     items: List[Dict[str, Any]] = []
@@ -317,7 +337,9 @@ def _render_list(
         row.add_column("Cmd", name)
         row.add_column("Aliases", ", ".join(aliases))
         row.add_column("Summary", summary)
-        table.set_row_selection_args(len(table.rows) - 1, ["-cmd", name])
+        row_index = len(table.rows) - 1
+        table.set_row_selection_args(row_index, ["-cmd", name])
+        table.set_row_selection_action(row_index, [".help", name])
         items.append(meta)
 
     ctx.set_last_result_table(table, items)
@@ -345,7 +367,11 @@ def _render_detail(meta: Dict[str, Any], _args: Sequence[str]) -> None:
             seen_examples.add(text)
             explicit_example.append(text)
 
+    tailored = _normalize_cmdlet_key(cmd_name) in {"file", "metadata"}
     fallback_example = _example_for_cmd(cmd_name)
+    if tailored:
+        explicit_example = []
+        seen_examples = set()
     for fallback in fallback_example:
         text = str(fallback or "").strip()
         if not text or text in seen_examples:
@@ -362,6 +388,8 @@ def _render_detail(meta: Dict[str, Any], _args: Sequence[str]) -> None:
         header_lines.append("Aliases: " + ", ".join(aliases))
     if details:
         header_lines.extend(str(line) for line in details if str(line).strip())
+    if _normalize_cmdlet_key(cmd_name) in {"file", "metadata"}:
+        header_lines.append("Examples search the help plugin. Select @N to run one and see the sample table.")
     if explicit_example:
         header_lines.append("Examples available below")
 
@@ -408,6 +436,7 @@ def _render_detail(meta: Dict[str, Any], _args: Sequence[str]) -> None:
                 tokens = _parse_example_tokens(example_text)
                 if tokens:
                     example_table.set_row_selection_args(idx, tokens)
+                    example_table.set_row_selection_action(idx, tokens)
     else:
         example_table._interactive(True)
         row = example_table.add_row()
@@ -515,12 +544,28 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
 
     filter_text = parsed.get("filter")
     cmd_arg = parsed.get("cmd")
+    if parsed.get("sample") or parsed.get("reset"):
+        from SYS.help_sample import ensure_sample
+
+        root = ensure_sample(reset=bool(parsed.get("reset")))
+        action = "Reset" if parsed.get("reset") else "Ready"
+        log(f"{action} help sample: {root}")
+        log("Search it with: file -search -plugin help *")
+        if not cmd_arg:
+            return 0
 
     if cmd_arg:
         target_meta = _find_cmd_metadata(str(cmd_arg), metadata)
         if not target_meta:
             log(f"Unknown command: {cmd_arg}", file=sys.stderr)
             return 1
+        if _normalize_cmdlet_key(str(cmd_arg)) in {"file", "metadata"}:
+            try:
+                from SYS.help_sample import ensure_sample
+
+                ensure_sample()
+            except Exception:
+                pass
         _render_detail(target_meta, args)
         return 0
 
@@ -533,7 +578,7 @@ CMDLET = Cmdlet(
     alias=["help",
            "?"],
     summary="List commands, or details for one command",
-    usage=".help [cmd] [-filter text]",
+    usage=".help [cmd] [-filter text] [-sample] [-reset]",
     arg=[
         CmdletArg(
             name="cmd",
@@ -546,6 +591,18 @@ CMDLET = Cmdlet(
             name="-filter",
             type="string",
             description="Filter cmdlet by substring",
+            required=False,
+        ),
+        CmdletArg(
+            name="-sample",
+            type="flag",
+            description="Create the 9-file help sample library",
+            required=False,
+        ),
+        CmdletArg(
+            name="-reset",
+            type="flag",
+            description="Delete and recreate the help sample library",
             required=False,
         ),
     ],

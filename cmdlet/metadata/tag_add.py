@@ -1232,6 +1232,13 @@ class Add_Tag(Cmdlet):
                                 )
 
                             _set_item_tags(res, updated_tag_list)
+                            if raw_path:
+                                try:
+                                    from SYS.help_sample import write_sample_tags
+
+                                    write_sample_tags(Path(str(raw_path)), updated_tag_list)
+                                except Exception:
+                                    pass
                             if actual_tag_to_add:
                                 _set_item_tag_display(res, actual_tag_to_add)
                             if adding_title:

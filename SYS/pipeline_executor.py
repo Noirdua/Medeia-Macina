@@ -1180,11 +1180,22 @@ class PipelineExecutor:
                         except Exception:
                             merged_action = None
                     if not merged_action:
-                        log(
-                            "Could not add the selected files. Use @1 for one file.",
-                            file=sys.stderr,
-                        )
-                        return False, None
+                        table_name = str(table_type or "").replace("_", "-").strip().lower()
+                        looks_like_file_add = table_name == "add-file.directory"
+                        if not looks_like_file_add:
+                            for action in row_actions or []:
+                                if not action:
+                                    continue
+                                head = [str(tok).replace("_", "-").strip().lower() for tok in action[:3]]
+                                if "add" in head or "-add" in head or "-path" in head:
+                                    looks_like_file_add = True
+                                    break
+                        if looks_like_file_add:
+                            log(
+                                "Could not add the selected files. Use @1 for one file.",
+                                file=sys.stderr,
+                            )
+                            return False, None
                     replay = _split_pipeline_tokens(merged_action)
                     if replay:
                         stages[:] = replay
