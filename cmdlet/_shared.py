@@ -214,27 +214,3 @@ def resolve_media_kind_by_extension(path: Path) -> str:
     if suffix in {".pdf", ".epub", ".txt", ".mobi", ".azw3", ".cbz", ".cbr", ".doc", ".docx"}:
         return "document"
     return "other"
-
-
-def should_show_help(args: Sequence[str]) -> bool:
-    """Check if help flag was passed in arguments.
-
-    Consolidates repeated pattern of checking for help flags across cmdlet.
-
-    Args:
-            args: Command arguments to check
-
-    Returns:
-            True if any help flag is present (-?, /?, --help, -h, help, --cmdlet)
-
-    Examples:
-            if should_show_help(args):
-                    log(json.dumps(CMDLET, ensure_ascii=False, indent=2))
-                    return 0
-    """
-    try:
-        return any(
-            str(a).lower() in {"-?", "/?", "--help", "-h", "help", "--cmdlet"} for a in args
-        )
-    except Exception:
-        return False

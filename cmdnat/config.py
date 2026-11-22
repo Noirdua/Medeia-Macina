@@ -37,6 +37,7 @@ from SYS.command_parsing import (
 
 _PREFERENCES_BROWSE_PATH = "__preferences__"
 _APPEARANCE_BROWSE_PATH = "__appearance__"
+_SYNTAX_BROWSE_PATH = "__syntax__"
 _PLUGINS_BROWSE_PATH = "__plugins__"
 _PLUGIN_CATEGORY_KEYS = ("plugin",)
 _CREATE_INSTANCE_FLAG = "-create-instance"
@@ -48,6 +49,7 @@ _KNOWN_SECTION_LABELS = {
 _KNOWN_SECTION_DESCRIPTIONS = {
     _PREFERENCES_BROWSE_PATH: "Global preferences and simple values",
     _APPEARANCE_BROWSE_PATH: "Table theme, colors, and panel styling",
+    _SYNTAX_BROWSE_PATH: "Prompt text and CLI syntax colors",
     _PLUGINS_BROWSE_PATH: "All configured plugins and plugin instances",
     "plugin": "Plugin configuration",
 }
@@ -294,6 +296,8 @@ def _format_config_label(value: Any) -> str:
         return "Preferences"
     if text == _APPEARANCE_BROWSE_PATH:
         return "Appearance"
+    if text == _SYNTAX_BROWSE_PATH:
+        return "Syntax"
     if text == _PLUGINS_BROWSE_PATH:
         return "Plugins"
     overrides = {
@@ -317,6 +321,8 @@ def _format_config_path_label(browse_path: Optional[str]) -> str:
         return "Preferences"
     if text == _APPEARANCE_BROWSE_PATH:
         return "Appearance"
+    if text == _SYNTAX_BROWSE_PATH:
+        return "Appearance / Syntax"
     if text == _PLUGINS_BROWSE_PATH:
         return "Plugins"
     parts = [part for part in text.split(".") if part]
@@ -678,6 +684,9 @@ def _resolve_config_branch(
 
     if text == _APPEARANCE_BROWSE_PATH:
         return _appearance_branch(config_data)
+
+    if text == _SYNTAX_BROWSE_PATH:
+        return _syntax_branch(config_data)
 
     if text == _PLUGINS_BROWSE_PATH:
         return {
@@ -1112,8 +1121,12 @@ def _appearance_keys() -> set[str]:
     return _schema_keys_for_group("Appearance")
 
 
+def _syntax_keys() -> set[str]:
+    return _schema_keys_for_group("Syntax")
+
+
 def _preference_branch(config_data: Dict[str, Any]) -> Dict[str, Any]:
-    skip = _appearance_keys()
+    skip = _appearance_keys() | _syntax_keys()
     branch: Dict[str, Any] = {
         key: value
         for key, value in _visible_config_entries(config_data)
@@ -1148,6 +1161,19 @@ def _appearance_branch(config_data: Dict[str, Any]) -> Dict[str, Any]:
     return branch
 
 
+def _syntax_branch(config_data: Dict[str, Any]) -> Dict[str, Any]:
+    keep = _syntax_keys()
+    branch: Dict[str, Any] = {}
+    for field in _global_schema_fields():
+        key = str(field.get("key") or "").strip()
+        if not key or key not in keep:
+            continue
+        stored = config_data.get(key) if isinstance(config_data, dict) else None
+        text = str(stored or "").strip()
+        branch[key] = text or field.get("default", "")
+    return branch
+
+
 def _value_item_title(key_path: str, name: str) -> str:
     parts = _split_config_path(key_path)
     if len(parts) <= 1:
@@ -1172,7 +1198,11 @@ def _build_nested_config_items(
     section_items: List[Dict[str, Any]] = []
     value_items: List[Dict[str, Any]] = []
     action_items: List[Dict[str, Any]] = []
-    is_flat_view = browse_path in {_PREFERENCES_BROWSE_PATH, _APPEARANCE_BROWSE_PATH}
+    is_flat_view = browse_path in {
+        _PREFERENCES_BROWSE_PATH,
+        _APPEARANCE_BROWSE_PATH,
+        _SYNTAX_BROWSE_PATH,
+    }
     parts = _split_config_path(browse_path)
     is_multi_instance_root = _is_multi_instance_plugin_root_path(browse_path)
 
@@ -1245,6 +1275,16 @@ def _build_nested_config_items(
 
     section_items.sort(key=lambda item: str(item.get("title") or "").lower())
     value_items.sort(key=lambda item: str(item.get("title") or item.get("name") or "").lower())
+    if browse_path == _APPEARANCE_BROWSE_PATH:
+        section_items.insert(
+            0,
+            _build_section_item(
+                title="Syntax",
+                browse_path=_SYNTAX_BROWSE_PATH,
+                value=_syntax_branch(config_data),
+                description="Prompt text and CLI syntax colors",
+            ),
+        )
     if is_multi_instance_root:
         action_items.append(_build_create_instance_item(parts[0], parts[1]))
     elif len(parts) == 2 and parts[0] == "plugin":
@@ -1299,7 +1339,9 @@ def _build_config_header_lines(browse_path: Optional[str]) -> List[str]:
     path_line = f"Path: {_format_config_path_label(text)}"
     plugin_lines = _plugin_config_header_lines(text)
     parts = _split_config_path(text)
-    if text in {_PREFERENCES_BROWSE_PATH, _APPEARANCE_BROWSE_PATH}:
+    if text == _SYNTAX_BROWSE_PATH:
+        nav = "Colors are #RRGGBB or a color name. Blank or default restores the built-in color. Prompt is the text before each command. Use @N | .config <value>. Use @.. to go back."
+    elif text in {_PREFERENCES_BROWSE_PATH, _APPEARANCE_BROWSE_PATH}:
         nav = "Use @N on a setting to pick from available options (or see how to set free-text values). Use @N | .config <value> to set directly. Use @.. to go back."
     elif _is_multi_instance_plugin_root_path(text):
         nav = "Use @N on an instance to open it. On Add Instance: @N | .config <name>. Delete an instance: @N | .config -delete. Use @.. to go back."
@@ -1317,6 +1359,8 @@ def _parent_browse_path_for_key(key_path: str) -> Optional[str]:
     if not parts:
         return None
     if len(parts) == 1:
+        if parts[0] in _syntax_keys():
+            return _SYNTAX_BROWSE_PATH
         if parts[0] in _appearance_keys():
             return _APPEARANCE_BROWSE_PATH
         return _PREFERENCES_BROWSE_PATH
@@ -1502,16 +1546,29 @@ def _show_value_edit_help(
         table.set_source_command(".config", ["-browse", parent_path])
     else:
         table.set_source_command(".config", [])
+    value_style = ""
+    if target_key in _syntax_keys() and target_key != "prompt_text":
+        from SYS.cli_syntax_theme import syntax_color_style
+
+        value_style = syntax_color_style(current_display)
+    current_line: Any = f"Current value: {current_display if str(current_display or '').strip() else '(empty)'}"
+    if value_style:
+        from rich.text import Text
+
+        current_line = Text.assemble(
+            "Current value: ",
+            (f"██ {current_display}", value_style),
+        )
     table.set_header_lines([
         f"Free-text setting: {display_name}",
-        f"Current value: {current_display if str(current_display or '').strip() else '(empty)'}",
+        current_line,
         f"Set with: @1 | .config <new_value>   or   .config {target_key} <new_value>",
         "Use @.. to go back.",
     ])
 
     row = table.add_row()
     row.add_column("Name", display_name)
-    row.add_column("Value", current_display)
+    row.add_column("Value", current_display, style=value_style or None)
     row.add_column("Key", target_key)
 
     ctx.set_last_result_table(table, items)
@@ -1546,7 +1603,12 @@ def _show_config_table(
         if choices and isinstance(choices, list) and len(choices) > 0:
             choices_repr = ", ".join(str(c) for c in choices)
             value_text = f"{value_text}  [{choices_repr}]"
-        row.add_column("Value", value_text)
+        value_style = ""
+        if browse_path == _SYNTAX_BROWSE_PATH and str(item.get("key") or "") != "prompt_text":
+            from SYS.cli_syntax_theme import syntax_color_style
+
+            value_style = syntax_color_style(value_text)
+        row.add_column("Value", value_text, style=value_style or None)
         row.add_column("Type", item.get("type", ""))
         if item.get("kind") == "section" and item.get("browse_path"):
             table.set_row_selection_action(
@@ -1601,6 +1663,8 @@ def _resolve_direct_browse_path(
         return _PREFERENCES_BROWSE_PATH
     if lowered in {"appearance", "theme", "display"}:
         return _APPEARANCE_BROWSE_PATH
+    if lowered in {"syntax", "prompt"}:
+        return _SYNTAX_BROWSE_PATH
     if lowered in {"plugins", "plugin"}:
         return _PLUGINS_BROWSE_PATH
 

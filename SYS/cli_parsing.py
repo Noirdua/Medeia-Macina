@@ -105,6 +105,35 @@ def lex_template_inner(text: str, *, default_class: str = "class:string") -> Lis
     return tokens
 
 
+ACTION_FLAGS = frozenset({
+    "-add", "--add",
+    "-delete", "--delete", "-del", "--del",
+    "-get", "--get",
+    "-search", "--search",
+    "-download", "--download", "-dl", "--dl",
+    "-merge", "--merge",
+    "-convert", "--convert",
+    "-trim", "--trim",
+    "-archive", "--archive",
+    "-inspect", "--inspect", "-info", "--info",
+    "-auto", "--auto", "-autotag", "--autotag",
+    "-update", "--update",
+    "-remove", "--remove", "-uninstall", "--uninstall",
+    "-install", "--install",
+    "-available", "--available",
+    "-refresh", "--refresh", "-refresh-rooms", "--refresh-rooms",
+    "-send", "--send",
+    "-settings", "--settings",
+    "-list", "--list",
+    "-play", "--play",
+    "-stop", "--stop",
+    "-sample", "--sample",
+    "-reset", "--reset",
+    "-source", "--source",
+    "-validate", "--validate",
+    "-orphans", "--orphans",
+    "-files", "--files",
+})
 TOKEN_PATTERN = re.compile(
     r"""
     (\s+) |                                      # 1. Whitespace
@@ -590,7 +619,8 @@ class MedeiaLexer(Lexer):
                     tokens.append(("class:cmdlet", word))
                     is_cmdlet = False
                 elif word.startswith("-"):
-                    tokens.append(("class:argument", word))
+                    flag_class = "class:action" if word.lower() in ACTION_FLAGS else "class:argument"
+                    tokens.append((flag_class, word))
                 else:
                     if not _emit_system_token(word) and not _emit_keyed_value(word):
                         if any(ch in word for ch in "[]$()|") or "(" in word:

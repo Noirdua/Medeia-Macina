@@ -17,7 +17,6 @@ parse_tag_arguments = sh.parse_tag_arguments
 render_tag_value_templates = sh.render_tag_value_templates
 merge_sequences = sh.merge_sequences
 extract_tag_from_result = sh.extract_tag_from_result
-should_show_help = sh.should_show_help
 get_field = sh.get_field
 from SYS.logger import debug, log
 
@@ -384,11 +383,6 @@ CMDLET = _DELETE_TAG_CMDLET
 
 
 def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
-    # Help
-    if should_show_help(args):
-        log(f"Cmdlet: {_DELETE_TAG_CMDLET.name}\nSummary: {_DELETE_TAG_CMDLET.summary}\nUsage: {_DELETE_TAG_CMDLET.usage}")
-        return 0
-
     def _looks_like_tag_row(obj: Any) -> bool:
         if obj is None:
             return False

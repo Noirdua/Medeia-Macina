@@ -64,6 +64,7 @@ from SYS.pipeline import PipelineExecutor
 
 # Selection parsing and REPL lexer moved to SYS.cli_parsing
 from SYS.cli_parsing import SelectionSyntax, MedeiaLexer
+from SYS.cli_syntax_theme import resolve_prompt_text, resolve_syntax_style
 
 
 # SelectionFilterSyntax moved to SYS.cli_parsing (imported above)
@@ -540,7 +541,7 @@ class CLI:
 
         console.print(root)
 
-        prompt_text = "<🜂🜄|🜁🜃>"
+        prompt_text = resolve_prompt_text(self._config_loader.load_shared())
 
         startup_table = Table(
             "*********<IGNITIO>*********<NOUSEMPEH>*********<RUGRAPOG>*********<OMEGHAU>*********"
@@ -631,27 +632,7 @@ class CLI:
             stdout_console().print()
             stdout_console().print(startup_table)
 
-        style = Style.from_dict(
-            {
-                "cmdlet": "#ffffff",
-                "argument": "#3b8eea",
-                "value": "#9a3209",
-                "string": "#6d0d93",
-                "pipe": "#4caf50",
-                "selection_at": "#f1c40f",
-                "selection_range": "#4caf50",
-                "system_hash": "#e5c07b",
-                "system_field": "#e06c75",
-                "system_op": "#56b6c2",
-                "system_number": "#98c379",
-                "template_func": "#56b6c2",
-                "template_bracket": "#e5c07b",
-                "template_or": "#d19a66",
-                "template_placeholder": "#98c379",
-                "template_field": "#c678dd",
-                "bottom-toolbar": "noreverse",
-            }
-        )
+        style = Style.from_dict(resolve_syntax_style(self._config_loader.load_shared()))
 
         class ToolbarState:
             text: str = ""
@@ -831,6 +812,12 @@ class CLI:
         try:
             while True:
                 try:
+                    live_config = self._config_loader.load_shared()
+                    prompt_text = resolve_prompt_text(live_config)
+                    try:
+                        session.style = Style.from_dict(resolve_syntax_style(live_config))
+                    except Exception:
+                        pass
                     with queued_inputs_lock:
                         queued_payload = queued_inputs.pop(0) if queued_inputs else None
 
@@ -842,7 +829,18 @@ class CLI:
                         else:
                             user_input = ""
                     else:
-                        user_input = session.prompt(prompt_text).strip()
+                        pending_prompt = ""
+                        try:
+                            from SYS import pipeline as prompt_ctx
+
+                            pending_prompt = prompt_ctx.take_pending_prompt_text().strip()
+                        except Exception:
+                            pending_prompt = ""
+                        if pending_prompt:
+                            print(f"{prompt_text}{pending_prompt}")
+                            user_input = pending_prompt
+                        else:
+                            user_input = session.prompt(prompt_text).strip()
                         if user_input:
                             with queued_inputs_lock:
                                 if injected_payload is not None:
@@ -1079,10 +1077,7 @@ class CLI:
                             except Exception:
                                 pass
                         cmd_name = tokens[0].replace("_", "-").lower()
-                        if any(arg in {"-help", "--help", "-h"} for arg in tokens[1:]):
-                            tokens = [".help", cmd_name]
-                        else:
-                            tokens = [cmd_name, *tokens[1:]]
+                        tokens = [cmd_name, *tokens[1:]]
                     self._run_tokens(tokens)
                 finally:
                     if pipeline_ctx_ref and hasattr(pipeline_ctx_ref, "get_last_execution_result"):

@@ -1146,12 +1146,12 @@ class PipelineExecutor:
             if isinstance(row_args, list) and row_args:
                 tokens = [str(x) for x in row_args if x is not None]
             if tokens:
-                stage_groups = _split_pipeline_tokens(tokens)
-                if stage_groups:
-                    for stage in reversed(stage_groups):
-                        stages.insert(0, stage)
-                    selection_indices = []
-                    example_selector_triggered = True
+                command_text = " ".join(tokens)
+                try:
+                    ctx.set_pending_prompt_text(command_text)
+                except Exception:
+                    pass
+                return True, None
 
         if not example_selector_triggered:
             if not (
@@ -1196,12 +1196,13 @@ class PipelineExecutor:
                                 file=sys.stderr,
                             )
                             return False, None
-                    replay = _split_pipeline_tokens(merged_action)
-                    if replay:
-                        stages[:] = replay
-                    else:
-                        stages.insert(0, list(merged_action))
-                    return True, None
+                    if merged_action:
+                        replay = _split_pipeline_tokens(merged_action)
+                        if replay:
+                            stages[:] = replay
+                        else:
+                            stages.insert(0, list(merged_action))
+                        return True, None
 
                 if source_cmd and not skip_pipe_expansion and not prefer_row_action:
                     src = str(source_cmd).replace("_", "-").strip().lower()
@@ -1380,7 +1381,7 @@ class PipelineExecutor:
                         and len(selection_indices) == 1
                     ),
                 ):
-                    return False, None
+                    return True, None
 
                 from SYS.pipe_object import coerce_to_pipe_object
 
@@ -2012,6 +2013,16 @@ class PipelineExecutor:
                 return self._exit_code(pipeline_status)
             if initial_piped is not None:
                 piped_result = initial_piped
+            expanded_command = " | ".join(
+                " ".join(str(token) for token in stage) for stage in stages if stage
+            )
+            if expanded_command and expanded_command != pipeline_text.strip():
+                try:
+                    from SYS.logger import debug_panel
+
+                    debug_panel("Ran", [("command", expanded_command)])
+                except Exception:
+                    log(expanded_command)
 
             try:
                 from SYS.instance_chooser import (

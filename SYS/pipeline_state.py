@@ -555,6 +555,18 @@ def clear_current_command_text() -> None:
     state.pipeline_command_text = ""
 
 
+def set_pending_prompt_text(command_text: Optional[str]) -> None:
+    state = _get_pipeline_state()
+    state.pending_prompt_text = str(command_text or "")
+
+
+def take_pending_prompt_text() -> str:
+    state = _get_pipeline_state()
+    text = str(getattr(state, "pending_prompt_text", "") or "")
+    state.pending_prompt_text = ""
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Pipeline text splitting
 # ---------------------------------------------------------------------------
@@ -1358,6 +1370,8 @@ __all__ = [
     "set_current_command_text",
     "get_current_command_text",
     "clear_current_command_text",
+    "set_pending_prompt_text",
+    "take_pending_prompt_text",
     # Pipeline splitting
     "split_pipeline_text",
     "get_current_command_stages",

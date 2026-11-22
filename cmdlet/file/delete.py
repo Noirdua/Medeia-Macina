@@ -448,10 +448,6 @@ class Delete_File(sh.Cmdlet):
 
     def run(self, result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
         """Execute delete-file command."""
-        if sh.should_show_help(args):
-            log(f"Cmdlet: {self.name}\nSummary: {self.summary}\nUsage: {self.usage}")
-            return 0
-
         # Parse arguments
         override_query: str | None = None
         override_hash: str | None = None

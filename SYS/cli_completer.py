@@ -1862,9 +1862,30 @@ class CmdletCompleter(Completer):
 
                             matrix_plugin = get_plugin("matrix", config)
                             if matrix_plugin is not None:
-                                names = matrix_plugin.room_choice_names(instance_hint or None)
-                                if names:
-                                    inline_choices = names
+                                rows = matrix_plugin.cached_named_rooms(instance_hint or None)
+                                matched = []
+                                for row in rows:
+                                    name = str(row.get("name") or "").strip()
+                                    if not name:
+                                        continue
+                                    kind = str(row.get("kind") or "")
+                                    visibility = str(row.get("visibility") or "")
+                                    blob = f"{name} {row.get('room_id') or ''} {kind} {visibility}".lower()
+                                    if partial_lower and partial_lower not in blob:
+                                        continue
+                                    matched.append((name, kind, visibility))
+                                for name, kind, visibility in matched:
+                                    insert = name
+                                    if any(ch in name for ch in " \t,"):
+                                        insert = '"' + name.replace('"', "") + '"'
+                                    kind_label = "DM" if kind == "dm" else "Group"
+                                    visibility_label = "Public" if visibility == "public" else "Private"
+                                    yield Completion(
+                                        insert,
+                                        start_position=-len(partial),
+                                        display_meta=f"{kind_label} · {visibility_label}",
+                                    )
+                                return
                         except Exception:
                             pass
                     if field in {"instance", "store"} and _closed_group(partial):

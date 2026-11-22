@@ -20,7 +20,6 @@ from SYS.cmdlet_spec import QueryArg
 
 DEFAULT_LIMIT = 100
 WORKER_STATUS_FILTERS = {"running", "completed", "error", "cancelled"}
-HELP_FLAGS = {"-?", "/?", "--help", "-h", "help", "--cmdlet"}
 QUERY_ARG_CHOICES = {
     "limit": ["10", "30", "50", "100", "200"],
     "status": sorted(WORKER_STATUS_FILTERS),
@@ -152,10 +151,6 @@ class _WorkerDB:
         return [_normalize_worker_row(dict(row)) for row in rows]
 
 
-def _has_help_flag(args_list: Sequence[str]) -> bool:
-    return any(str(arg).lower() in HELP_FLAGS for arg in args_list)
-
-
 @dataclass
 class WorkerCommandOptions:
     status: str | None = None
@@ -172,10 +167,6 @@ def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
     selection_requested = bool(selection_indices) and isinstance(result,
                                                                  list
                                                                  ) and len(result) > 0
-
-    if _has_help_flag(args_list):
-        ctx.emit(CMDLET.__dict__)
-        return 0
 
     options = _parse_worker_args(args_list)
 

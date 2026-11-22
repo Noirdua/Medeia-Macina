@@ -18,7 +18,6 @@ SharedArgs = sh.SharedArgs
 normalize_hash = sh.normalize_hash
 parse_cmdlet_args = sh.parse_cmdlet_args
 normalize_result_input = sh.normalize_result_input
-should_show_help = sh.should_show_help
 
 
 class Get_Note(Cmdlet):
@@ -47,10 +46,6 @@ class Get_Note(Cmdlet):
         self.register()
 
     def run(self, result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
-        if should_show_help(args):
-            log(f"Cmdlet: {self.name}\nSummary: {self.summary}\nUsage: {self.usage}")
-            return 0
-
         parsed = parse_cmdlet_args(args, self)
         store_override = parsed.get("instance")
         query_hash, query_valid = sh.require_single_hash_query(

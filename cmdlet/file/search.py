@@ -34,7 +34,6 @@ from .._shared import (
     SharedArgs,
     get_field,
     get_preferred_store_backend,
-    should_show_help,
     normalize_hash,
     first_title_tag,
     parse_hash_query,
@@ -878,10 +877,6 @@ class search_file(Cmdlet):
         Returns:
             0 on success, 1 on error
         """
-        if should_show_help(args):
-            log(f"Cmdlet: {self.name}\nSummary: {self.summary}\nUsage: {self.usage}")
-            return 0
-
         args_list = [str(arg) for arg in (args or [])]
 
         refresh_mode = any(

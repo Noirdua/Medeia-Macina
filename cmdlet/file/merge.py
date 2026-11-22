@@ -29,7 +29,6 @@ get_pipe_object_hash = sh.get_pipe_object_hash
 get_pipe_object_path = sh.get_pipe_object_path
 normalize_result_input = sh.normalize_result_input
 parse_cmdlet_args = sh.parse_cmdlet_args
-should_show_help = sh.should_show_help
 
 from SYS import pipeline as ctx
 
@@ -88,11 +87,6 @@ def _ensure_metadata_imports() -> None:
 def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
     """Merge multiple files into one."""
     _ensure_metadata_imports()
-
-    # Parse help
-    if should_show_help(args):
-        log(f"Cmdlet: {CMDLET.name}\nSummary: {CMDLET.summary}\nUsage: {CMDLET.usage}")
-        return 0
 
     # Parse arguments
     parsed = parse_cmdlet_args(args, CMDLET)

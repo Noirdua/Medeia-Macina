@@ -18,7 +18,6 @@ CmdletArg = sh.CmdletArg
 SharedArgs = sh.SharedArgs
 normalize_hash = sh.normalize_hash
 get_hash_for_operation = sh.get_hash_for_operation
-should_show_help = sh.should_show_help
 get_field = sh.get_field
 
 CMDLET = Cmdlet(
@@ -37,11 +36,6 @@ CMDLET = Cmdlet(
 
 
 def _run(result: Any, _args: Sequence[str], config: Dict[str, Any]) -> int:
-    # Help
-    if should_show_help(_args):
-        log(f"Cmdlet: {CMDLET.name}\nSummary: {CMDLET.summary}\nUsage: {CMDLET.usage}")
-        return 0
-
     # Parse -query and -instance override
     override_query: str | None = None
     override_store: str | None = None

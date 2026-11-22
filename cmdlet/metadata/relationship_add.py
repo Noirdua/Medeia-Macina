@@ -21,7 +21,6 @@ CmdletArg = sh.CmdletArg
 SharedArgs = sh.SharedArgs
 parse_cmdlet_args = sh.parse_cmdlet_args
 normalize_result_input = sh.normalize_result_input
-should_show_help = sh.should_show_help
 get_field = sh.get_field
 
 CMDLET = Cmdlet(
@@ -390,11 +389,6 @@ def _run(result: Any, _args: Sequence[str], config: Dict[str, Any]) -> int:
 
     Returns 0 on success, non-zero on failure.
     """
-    # Help
-    if should_show_help(_args):
-        log(f"Cmdlet: {CMDLET.name}\nSummary: {CMDLET.summary}\nUsage: {CMDLET.usage}")
-        return 0
-
     # Parse arguments using CMDLET spec
     parsed = parse_cmdlet_args(_args, CMDLET)
     arg_path: Optional[Path] = None

@@ -76,8 +76,9 @@ def sample_root() -> Path:
     return Path(__file__).resolve().parents[1] / "data" / "help-sample"
 
 
-def _sidecar_text(tags: List[str]) -> str:
-    lines = ["[tags]"]
+def _sidecar_text(name: str, tags: List[str]) -> str:
+    stem = Path(name).stem
+    lines = [f"url:https://example.invalid/help/{stem}", "[tags]"]
     lines.extend(tags)
     return "\n".join(lines) + "\n"
 
@@ -126,6 +127,9 @@ def ensure_sample(*, reset: bool = False) -> Path:
             path.write_bytes(spec["bytes"])  # type: ignore[arg-type]
         sidecar = path.parent / (path.name + ".metadata")
         if reset or not sidecar.is_file():
-            sidecar.write_text(_sidecar_text(list(spec["tags"])), encoding="utf-8")  # type: ignore[arg-type]
+            sidecar.write_text(
+                _sidecar_text(str(spec["name"]), list(spec["tags"])),
+                encoding="utf-8",
+            )
     _drop_local_instance()
     return root

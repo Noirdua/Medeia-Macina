@@ -39,8 +39,8 @@ class SearchResult:
             "annotations": self.annotations,
             "media_kind": self.media_kind,
             "size_bytes": self.size_bytes,
-            "tag": list(self.tag),
-            "columns": list(self.columns),
+            "tag": list(self.tag or []),
+            "columns": list(self.columns or []),
             "full_metadata": full_metadata,
         }
 

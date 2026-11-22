@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Sequence
 
 from SYS.cmdlet_spec import Cmdlet, CmdletArg
-from cmdlet._shared import display_and_persist_items, should_show_help
+from cmdlet._shared import display_and_persist_items
 
 CMDLET = Cmdlet(
     name=".jobs",
@@ -108,8 +108,6 @@ def _publish(plugin: str = "") -> int:
 
 
 def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
-    if should_show_help(args):
-        return 0
     from SYS import plugin_jobs
     from SYS.logger import log
     import sys

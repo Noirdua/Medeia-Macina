@@ -26,7 +26,6 @@ merge_sequences = sh.merge_sequences
 render_tag_value_templates = sh.render_tag_value_templates
 parse_cmdlet_args = sh.parse_cmdlet_args
 collapse_namespace_tags = sh.collapse_namespace_tags
-should_show_help = sh.should_show_help
 get_field = sh.get_field
 
 _FIELD_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -850,10 +849,6 @@ class Add_Tag(Cmdlet):
 
     def run(self, result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
         """Add tag to a file with smart filtering for pipeline results."""
-        if should_show_help(args):
-            log(f"Cmdlet: {self.name}\nSummary: {self.summary}\nUsage: {self.usage}")
-            return 0
-
         # Parse arguments
         parsed = parse_cmdlet_args(args, self)
 

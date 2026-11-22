@@ -798,6 +798,7 @@ class Column:
     name: str
     value: str
     width: Optional[int] = None
+    style: Optional[str] = None
 
     def __str__(self) -> str:
         """String representation of the column."""
@@ -825,7 +826,7 @@ class Row:
     payload: Optional[Any] = None
     """Original object that contributed to this row."""
 
-    def add_column(self, name: str, value: Any) -> None:
+    def add_column(self, name: str, value: Any, *, style: Optional[str] = None) -> None:
         """Add a column to this row."""
         # Normalize column header names.
         normalized_name = str(name or "").strip()
@@ -849,7 +850,7 @@ class Row:
             if formatted:
                 str_value = formatted
 
-        self.columns.append(Column(normalized_name, str_value))
+        self.columns.append(Column(normalized_name, str_value, style=style))
 
     def get_column(self, name: str) -> Optional[str]:
         """Get column value by name."""
@@ -1761,11 +1762,16 @@ class Table:
                 table.add_column(header)
 
         for row_idx, row in enumerate(self.rows, 1):
-            cells: List[str] = []
+            cells: List[Any] = []
             cells.append(str(row_idx))
             for name in col_names:
-                val = row.get_column(name) or ""
-                cells.append(self._apply_value_case(_sanitize_cell_text(val)))
+                column = next((col for col in row.columns if col.name.lower() == name.lower()), None)
+                val = column.value if column is not None else ""
+                text = self._apply_value_case(_sanitize_cell_text(val))
+                if column is not None and column.style:
+                    cells.append(_rich().Text(f"██ {text}", style=str(column.style)))
+                else:
+                    cells.append(text)
             table.add_row(
                 *cells,
                 style=get_result_table_row_style(

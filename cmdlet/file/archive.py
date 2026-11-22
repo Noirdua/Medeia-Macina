@@ -26,7 +26,6 @@ SharedArgs = sh.SharedArgs
 coerce_to_pipe_object = sh.coerce_to_pipe_object
 create_pipe_object_result = sh.create_pipe_object_result
 parse_cmdlet_args = sh.parse_cmdlet_args
-should_show_help = sh.should_show_help
 
 def _extract_sha256_hex(item: Any) -> str:
     return get_sha256_hex(item, "hash") or ""
@@ -215,10 +214,6 @@ def _unique_arcname(name: str, seen: Set[str]) -> str:
 
 
 def _run(result: Any, args: Sequence[str], config: Dict[str, Any]) -> int:
-    if should_show_help(args):
-        log(f"Cmdlet: {CMDLET.name}\nSummary: {CMDLET.summary}\nUsage: {CMDLET.usage}")
-        return 0
-
     parsed = parse_cmdlet_args(args, CMDLET)
 
     level_raw = parsed.get("level")

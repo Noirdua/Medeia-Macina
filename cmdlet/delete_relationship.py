@@ -21,8 +21,6 @@ def _extract_hash(item: Any) -> Optional[str]:
 def _run(args: List[str], config: Dict[str, Any]) -> int:
     try:
         parsed, _, _ = sh.parse_cmdlet_args(args)
-        if sh.should_show_help(parsed):
-            return 0
 
         # Relationship deletion is currently not implemented for Hydrus.
         # Legacy Folder storage has been removed.

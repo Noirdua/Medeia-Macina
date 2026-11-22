@@ -131,6 +131,8 @@ def get_date_format(config: Optional[Dict[str, Any]] = None) -> str:
 
 def global_config() -> List[Dict[str, Any]]:
     """Return configuration schema for global settings."""
+    from SYS.cli_syntax_theme import syntax_config_fields
+
     return [
         {
             "key": "debug",
@@ -250,6 +252,7 @@ def global_config() -> List[Dict[str, Any]]:
             "default": "auto",
             "choices": ["auto", "standard", "256", "truecolor", "none"],
         },
+        *syntax_config_fields(),
         {
             "key": "complete_while_typing",
             "label": "Complete While Typing",
