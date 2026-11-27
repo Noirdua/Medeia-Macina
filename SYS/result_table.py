@@ -1771,7 +1771,7 @@ class Table:
                 if column is not None and column.style:
                     cells.append(_rich().Text(f"██ {text}", style=str(column.style)))
                 else:
-                    cells.append(text)
+                    cells.append(_rich().Text(text))
             table.add_row(
                 *cells,
                 style=get_result_table_row_style(

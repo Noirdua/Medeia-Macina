@@ -143,9 +143,11 @@ def _print_saved_output_panel(item: Any, final_path: Path) -> None:
     grid = RichTable.grid(padding=(0, 1))
     grid.add_column(justify="right", style="bold")
     grid.add_column()
-    grid.add_row("Title", title or "(unknown)")
-    grid.add_row("Location", location or "(unknown)")
-    grid.add_row("Hash", file_hash or "(unknown)")
+    from rich.text import Text  # type: ignore
+
+    grid.add_row("Title", Text(title or "(unknown)"))
+    grid.add_row("Location", Text(location or "(unknown)"))
+    grid.add_row("Hash", Text(file_hash or "(unknown)"))
 
     try:
         console = stderr_console()

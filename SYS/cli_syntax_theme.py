@@ -81,7 +81,15 @@ def _color_value(raw: str, default: str) -> str:
 
 
 def resolve_syntax_style(config: Any = None) -> Dict[str, str]:
-    style = {"bottom-toolbar": "noreverse"}
+    style = {
+        "bottom-toolbar": "noreverse",
+        "completion-menu": "bg:#1c1c1c #f2f2f2",
+        "completion-menu.completion": "bg:#1c1c1c #f2f2f2",
+        "completion-menu.completion.current": "bg:#264f78 #ffffff",
+        "completion-menu.meta.completion": "bg:#1c1c1c #d0d0d0",
+        "completion-menu.meta.completion.current": "bg:#264f78 #ffffff",
+        "completion-menu.multi-column-meta": "bg:#1c1c1c #d0d0d0",
+    }
     for key, style_name, _label, default in SYNTAX_COLOR_FIELDS:
         style[style_name] = _color_value(_stored(config, key), default)
     return style

@@ -276,19 +276,23 @@ class Add_File(Cmdlet):
                     candidate_dir = Path(str(source_arg))
                     if candidate_dir.exists() and candidate_dir.is_dir():
                         dir_scan_mode = True
-                        debug(
-                            f"[add-file] Scanning directory for batch add: {candidate_dir}"
-                        )
                         dir_scan_results = Add_File._scan_directory_for_files(
                             candidate_dir
                         )
-                        if dir_scan_results:
-                            debug(
-                                f"[add-file] Found {len(dir_scan_results)} supported files in directory"
-                            )
+                        debug_panel(
+                            "add-file directory",
+                            [
+                                ("path", candidate_dir),
+                                ("files", len(dir_scan_results or [])),
+                            ],
+                        )
                         source_arg = None
                 except Exception as exc:
-                    debug(f"[add-file] Directory scan failed: {exc}")
+                    debug_panel(
+                        "add-file directory",
+                        [("path", source_arg), ("error", exc)],
+                        border_style="yellow",
+                    )
 
         if result is None and not source_arg and not explicit_source_list_results and not dir_scan_results:
             try:
@@ -363,10 +367,16 @@ class Add_File(Cmdlet):
 
         if explicit_source_list_results:
             items_to_process = explicit_source_list_results
-            debug(f"[add-file] Using {len(items_to_process)} files from source list")
+            debug_panel(
+                "add-file batch",
+                [("source", "list"), ("files", len(items_to_process))],
+            )
         elif dir_scan_results:
             items_to_process = dir_scan_results
-            debug(f"[add-file] Using {len(items_to_process)} files from directory scan")
+            debug_panel(
+                "add-file batch",
+                [("source", "directory"), ("files", len(items_to_process))],
+            )
         elif source_arg:
             items_to_process: List[Any] = [result]
         elif isinstance(result, list) and result:
@@ -374,45 +384,7 @@ class Add_File(Cmdlet):
         else:
             items_to_process = [result]
 
-        total_items = len(items_to_process) if isinstance(items_to_process, list) else 0
-        processed_items = 0
-        try:
-            ui, _ = progress.ui_and_pipe_index()
-            if ui is not None and total_items:
-                preview_items = (
-                    list(items_to_process)
-                    if isinstance(items_to_process, list) else [items_to_process]
-                )
-                progress.begin_pipe(
-                    total_items=total_items,
-                    items_preview=preview_items,
-                )
-        except Exception:
-            pass
-        try:
-            if total_items:
-                progress.set_percent(0)
-        except Exception:
-            pass
-
-        use_steps = False
-        steps_started = False
-        try:
-            ui, _ = progress.ui_and_pipe_index()
-            use_steps = (ui is not None) and (len(items_to_process) == 1)
-            if use_steps:
-                progress.begin_steps(5)
-                steps_started = True
-        except Exception:
-            use_steps = False
-
-        should_present_directory_selector = bool(dir_scan_mode and not has_downstream_stage)
-        if dir_scan_mode and has_downstream_stage:
-            debug(
-                "[add-file] Continuing with directory batch ingest because downstream stages exist"
-            )
-
-        if should_present_directory_selector:
+        if dir_scan_mode:
             try:
                 from SYS.result_table import Table
                 from pathlib import Path as _Path
@@ -486,6 +458,39 @@ class Add_File(Cmdlet):
                 debug(
                     f"[add-file] Failed to display directory scan result table: {exc}"
                 )
+                return 1
+
+        total_items = len(items_to_process) if isinstance(items_to_process, list) else 0
+        processed_items = 0
+        try:
+            ui, _ = progress.ui_and_pipe_index()
+            if ui is not None and total_items:
+                preview_items = (
+                    list(items_to_process)
+                    if isinstance(items_to_process, list) else [items_to_process]
+                )
+                progress.begin_pipe(
+                    total_items=total_items,
+                    items_preview=preview_items,
+                )
+        except Exception:
+            pass
+        try:
+            if total_items:
+                progress.set_percent(0)
+        except Exception:
+            pass
+
+        use_steps = False
+        steps_started = False
+        try:
+            ui, _ = progress.ui_and_pipe_index()
+            use_steps = (ui is not None) and (len(items_to_process) == 1)
+            if use_steps:
+                progress.begin_steps(5)
+                steps_started = True
+        except Exception:
+            use_steps = False
 
         collected_payloads: List[Dict[str, Any]] = []
         pending_relationship_pairs: Dict[str,
@@ -860,6 +865,22 @@ class Add_File(Cmdlet):
                     return f"Pipeline error: plugin '{canonical_plugin_name}' is not configured or not available for add-file."
                 return f"Pipeline error: unknown add-file plugin '{plugin_name}'."
 
+        if normalized_plugin_name in {"hydrusnetwork", "hydrus"}:
+            requested = str(plugin_instance or location or "").strip()
+            if not requested:
+                requested = Add_File._instance_from_query(parsed.get("query"))
+            if requested:
+                debug_panel(
+                    "Pipeline preflight",
+                    [("store", requested), ("plugin", "hydrusnetwork")],
+                )
+                probe = Add_File._hydrus_availability_error(requested, cfg, deps=deps)
+                if probe:
+                    return (
+                        f"Pipeline error: {probe}. "
+                        "Hydrus was not reachable, so the pipeline was not started."
+                    )
+
         if normalized_plugin_name == "local":
             requested_local = str(plugin_instance or location or "").strip() or "<default>"
             resolved_local_instance, resolved_local_path = Add_File._resolve_local_export_plugin_target(
@@ -875,6 +896,45 @@ class Add_File(Cmdlet):
                 )
 
         return None
+
+    @staticmethod
+    def _instance_from_query(query: Any) -> str:
+        text = str(query or "").strip()
+        if not text:
+            return ""
+        try:
+            from PluginCore.base import parse_inline_query_arguments
+
+            _leftover, fields = parse_inline_query_arguments(text)
+        except Exception:
+            fields = {}
+        if isinstance(fields, dict):
+            value = fields.get("instance") or fields.get("store")
+            if value:
+                return str(value).strip()
+        return ""
+
+    @staticmethod
+    def _hydrus_availability_error(
+        instance_name: str,
+        config: Dict[str, Any],
+        *,
+        deps: Optional[_CommandDependencies] = None,
+    ) -> Optional[str]:
+        if deps is None:
+            deps = _CommandDependencies(config)
+        provider = deps.get_plugin_for_cmdlet("hydrusnetwork", "add-file")
+        if provider is None:
+            return "Hydrus plugin is not available"
+        probe = getattr(provider, "availability_error", None)
+        if not callable(probe):
+            return None
+        try:
+            message = probe(str(instance_name or "").strip())
+        except Exception as exc:
+            return str(exc)
+        text = str(message or "").strip()
+        return text or None
 
     @staticmethod
     def _resolve_plugin_storage_backend(

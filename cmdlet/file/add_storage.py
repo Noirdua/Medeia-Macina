@@ -89,6 +89,38 @@ def _stop_live_progress_for_terminal_render() -> None:
         pass
 
 
+def _publish_kept_local_file(media_path: Path, pipe_obj: models.PipeObject) -> None:
+    try:
+        if not media_path.exists() or not media_path.is_file():
+            return
+    except Exception:
+        return
+    payload: Dict[str, Any] = {}
+    try:
+        raw = pipe_obj.to_dict()
+        if isinstance(raw, dict):
+            payload = dict(raw)
+    except Exception:
+        payload = {}
+    payload["path"] = str(media_path)
+    payload["store"] = "local"
+    payload["plugin"] = "local"
+    payload.pop("hash", None)
+    if not str(payload.get("title") or "").strip():
+        payload["title"] = media_path.stem
+    log(
+        f"Kept local file for retry: {media_path}. "
+        "Use @1 | file -add -plugin hydrusnetwork -instance <name> without downloading again.",
+        file=sys.stderr,
+    )
+    try:
+        from .._shared import display_and_persist_items
+
+        display_and_persist_items([payload], title="Kept download", subject=payload)
+    except Exception:
+        pass
+
+
 def _emit_pipe_object(pipe_obj: models.PipeObject) -> None:
     payload = pipe_obj.to_dict()
     ctx.emit(payload)
@@ -507,6 +539,7 @@ def _handle_plugin_upload(
 
     except Exception as exc:
         log(f"Upload failed: {exc}", file=sys.stderr)
+        _publish_kept_local_file(media_path, pipe_obj)
         return 1
 
     if isinstance(upload_result, dict):
@@ -861,7 +894,7 @@ def _handle_storage_backend(
         meta: Dict[str, Any] = {}
         try:
             is_folder_backend_meta = getattr(backend, "STORE_TYPE", "") == "folder"
-            if not is_folder_backend_meta:
+            if not is_folder_backend_meta and not media_path.exists():
                 _set_status("loading stored metadata")
                 meta = backend.get_metadata(resolved_hash) or {}
         except Exception:

@@ -270,6 +270,18 @@ metadata -add -extract "part (episode): (name)|part (episode) - (name)"
 `[-|:]` matches a dash or a colon, so both `part 1: serpents...` and
 `part 3 - satan...` fill `episode:` and `name:`.
 
+Brackets are optional by ORing the bracketed and plain forms. Each `|` branch
+may repeat the same `(field)`; the derived tags are identical:
+
+```powershell
+metadata -add -extract "[disc (disc)]|disc (disc)"
+```
+
+matches both `SCIENTOLOGY Phoenix Lectures [disc 5]` and
+`SCIENTOLOGY Phoenix Lectures disc 5`, writing `disc:5`. A `[` with no matching
+`]` in the same literal chunk is treated as a literal bracket. Add
+`--extract-debug` to print the compiled regex when a template does not match.
+
 ```powershell
 metadata -add -extract "(date)"
 metadata -add -extract "(date) kabbalah"

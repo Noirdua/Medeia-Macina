@@ -1161,7 +1161,6 @@ class CmdletCompleter(Completer):
                         n,
                         start_position=start_pos,
                         display_meta=signature,
-                        style="fg:#d19a66",
                     )
                 return
             if kind == "format":
@@ -1191,7 +1190,6 @@ class CmdletCompleter(Completer):
                     f"{primary}({ns})",
                     start_position=start_pos,
                     display_meta=signature,
-                    style="fg:#98c379",
                 )
                 yielded = True
             if yielded:
@@ -1226,7 +1224,6 @@ class CmdletCompleter(Completer):
                 f"{name}(",
                 start_position=start_pos,
                 display_meta=meta,
-                style="fg:#56b6c2",
             )
 
     def _extract_syntax_completions(self, token: str, stage_tokens: Sequence[str]):
@@ -1258,7 +1255,6 @@ class CmdletCompleter(Completer):
                     text,
                     start_position=start_pos,
                     display_meta=meta,
-                    style="fg:#e5c07b",
                 )
             return
         if hay.rstrip().endswith("]"):
@@ -1267,7 +1263,6 @@ class CmdletCompleter(Completer):
                     f"({field})",
                     start_position=0,
                     display_meta="extract field",
-                    style="fg:#c678dd",
                 )
 
     def _metadata_arg_names(

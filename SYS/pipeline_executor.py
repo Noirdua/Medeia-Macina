@@ -193,13 +193,26 @@ class PipelineExecutor:
         return True
 
     @staticmethod
-    def _preflight_pipeline_stages(stages: List[List[str]]) -> Optional[str]:
+    def _preflight_pipeline_stages(
+        stages: List[List[str]],
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
         """Return an error string if any stage is invalid, before running work."""
         for stage in stages or []:
             if not stage:
                 continue
             cmd = str(stage[0] or "").replace("_", "-").strip().lower()
             args = list(stage[1:])
+            add_args = PipelineExecutor._add_stage_args(cmd, args)
+            if add_args is not None and isinstance(config, dict):
+                try:
+                    from cmdlet.file.add import Add_File
+
+                    message = Add_File.validate_preflight_args(add_args, config)
+                except Exception:
+                    message = None
+                if message:
+                    return message
             if cmd in {"file"}:
                 try:
                     from cmdlet.file_cmdlet import File
@@ -249,6 +262,46 @@ class PipelineExecutor:
                         + "). Pipeline was not started."
                     )
         return None
+
+    @staticmethod
+    def _keep_failed_stage_emits(ctx: Any, stage_ctx: Any) -> None:
+        try:
+            emits = list(getattr(stage_ctx, "emits", []) or [])
+        except Exception:
+            emits = []
+        if not emits:
+            return
+        try:
+            from SYS.result_publication import publish_result_table
+            from SYS.result_table import Table
+
+            table = Table("Kept result")
+            for item in emits:
+                table.add_result(item)
+            publish_result_table(ctx, table, emits, subject=emits[0] if len(emits) == 1 else emits)
+            log(
+                f"Kept {len(emits)} pipeline item(s) after the failed stage. Continue with @N.",
+                file=sys.stderr,
+            )
+        except Exception:
+            logger.exception("Failed to keep pipeline items after a failed stage")
+
+    @staticmethod
+    def _add_stage_args(cmd: str, args: List[str]) -> Optional[List[str]]:
+        name = str(cmd or "").replace("_", "-").strip().lower()
+        if name in {"add-file"}:
+            return list(args or [])
+        if name != "file":
+            return None
+        try:
+            from cmdlet.file_cmdlet import File
+
+            action, passthrough, _seen = File._extract_action(args or [])
+        except Exception:
+            return None
+        if action != "add":
+            return None
+        return list(passthrough or [])
 
     @staticmethod
     def _validate_download_file_relationship_order(stages: List[List[str]]) -> bool:
@@ -1967,7 +2020,7 @@ class PipelineExecutor:
                 first_stage_select_all,
             )
 
-            preflight_error = self._preflight_pipeline_stages(stages)
+            preflight_error = self._preflight_pipeline_stages(stages, config)
             if preflight_error:
                 log(preflight_error, file=sys.stderr)
                 pipeline_status = "failed"
@@ -2694,6 +2747,7 @@ class PipelineExecutor:
                             if normalized_ret != 0:
                                 pipeline_status = "failed"
                                 pipeline_error = f"Stage '{cmd_name}' failed with exit code {normalized_ret}"
+                                self._keep_failed_stage_emits(ctx, stage_ctx)
                                 return self._exit_code(pipeline_status)
 
                         if stage_index + 1 < len(stages):

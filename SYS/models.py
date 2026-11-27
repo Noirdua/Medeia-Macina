@@ -1486,7 +1486,7 @@ class PipelineLiveProgress:
                 f"{self._pipe_labels[pipe_index]}: {suffix}",
                 start=False
             )
-            subtasks.update(sub_id, visible=False)
+            subtasks.update(sub_id, visible=True)
             self._subtask_ids[pipe_index].append(sub_id)
 
         # Show the first subtask spinner.

@@ -835,6 +835,7 @@ class Add_Tag(Cmdlet):
                 "- Target namespaces that already have a value are skipped (not overwritten).",
                 "- Use -extract to derive namespaced tags from the current title (title field or title: tag) using a simple template.",
                 '- Extract OR: [ - | : ] in literals, or | between patterns. Example: -extract "part (episode)[-|:](name)".',
+                '- Optional brackets: OR the bracketed and plain forms, e.g. -extract "[disc (disc)]|disc (disc)".',
                 "- Use $(namespace) inside a tag value to insert existing values, e.g. metadata -add \"title:$(track) - $(series)\".",
                 "- Format dates inline: metadata -add \"title:$(date, MM/DD/YY) $(series)\".",
                 "- Transforms: cutleft($(title), 27), left($(title), 10), padding(2, $(track)). Tab-complete shows signature and types.",
